@@ -395,6 +395,65 @@ class Particle {
     }
 }
 
+// ==================== PARTICLE POOL ====================
+// Reuse particle objects instead of creating/destroying them
+
+class ParticlePool {
+    constructor(initialSize = 500) {
+        this.available = [];
+        this.active = [];
+
+        // Pre-allocate particles
+        for (let i = 0; i < initialSize; i++) {
+            this.available.push(new Particle(0, 0, 0, 0, 0));
+        }
+    }
+
+    acquire(x, y, vx, vy, lifetime) {
+        let particle;
+
+        if (this.available.length > 0) {
+            // Reuse from pool
+            particle = this.available.pop();
+            particle.x = x;
+            particle.y = y;
+            particle.vx = vx;
+            particle.vy = vy;
+            particle.lifetime = lifetime;
+            particle.maxLifetime = lifetime;
+        } else {
+            // Pool exhausted, create new (shouldn't happen with good sizing)
+            particle = new Particle(x, y, vx, vy, lifetime);
+        }
+
+        this.active.push(particle);
+        return particle;
+    }
+
+    update(dt) {
+        // Update all active particles and move dead ones back to pool
+        for (let i = this.active.length - 1; i >= 0; i--) {
+            const particle = this.active[i];
+            particle.update(dt);
+
+            if (particle.lifetime <= 0) {
+                // Move back to available pool
+                this.active.splice(i, 1);
+                this.available.push(particle);
+            }
+        }
+    }
+
+    getActive() {
+        return this.active;
+    }
+
+    clear() {
+        this.available.push(...this.active);
+        this.active = [];
+    }
+}
+
 class SupernovaEffect {
     constructor(x, y, body = null, duration = 15.0) {
         this.x = x;
@@ -571,7 +630,7 @@ class Simulator {
         this.canvas = canvas;
         this.ctx = canvas.getContext('2d');
         this.bodies = [];
-        this.particles = [];
+        this.particlePool = new ParticlePool(1000); // Pre-allocate 1000 particles
         this.supernovaEffects = [];
         this.mergeEffects = [];
         this.running = true;
@@ -775,13 +834,8 @@ class Simulator {
         // Handle collisions
         this.handleCollisions();
 
-        // Update particles
-        for (let i = this.particles.length - 1; i >= 0; i--) {
-            this.particles[i].update(dt);
-            if (this.particles[i].lifetime <= 0) {
-                this.particles.splice(i, 1);
-            }
-        }
+        // Update particles using pool
+        this.particlePool.update(dt);
 
         // Update supernova effects
         for (let i = this.supernovaEffects.length - 1; i >= 0; i--) {
@@ -1550,7 +1604,7 @@ class Simulator {
     }
 
     drawParticles() {
-        for (const particle of this.particles) {
+        for (const particle of this.particlePool.getActive()) {
             const screenX = (particle.x - this.cameraX) * this.zoom;
             const screenY = (particle.y - this.cameraY) * this.zoom;
             const alpha = particle.getAlpha();
@@ -1621,8 +1675,7 @@ class Simulator {
             const vy = Math.sin(angle) * speed;
             const lifetime = Math.random() * lifetimeVariance + baseLifetime;
 
-            const particle = new Particle(x, y, vx, vy, lifetime);
-            this.particles.push(particle);
+            this.particlePool.acquire(x, y, vx, vy, lifetime);
         }
     }
 
@@ -1640,7 +1693,7 @@ class Simulator {
 
     clearAll() {
         this.bodies = [];
-        this.particles = [];
+        this.particlePool.clear();
         this.supernovaEffects = [];
         this.mergeEffects = [];
     }
