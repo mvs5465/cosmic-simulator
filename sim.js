@@ -16,6 +16,11 @@ class Body {
         this.rotationAngle = Math.random() * Math.PI * 2;
         this.rotationSpeed = (Math.random() - 0.5) * 0.15;
         this.pulseTime = 0; // For neutron star pulsation
+        this.pulseFrequency = (0.2 + Math.random() * 0.8) / 2.5; // 0.08-0.32x base frequency (5x slower / 2)
+        this.pulseBrightnessMin = 0.1 + Math.random() * 0.2; // 0.1-0.3 minimum brightness
+        this.pulseBrightnessMax = 0.8 + Math.random() * 0.4; // 0.8-1.2 maximum brightness
+        this.pulseRadiusMin = 1.8 + Math.random() * 0.4; // 1.8-2.2x minimum radius
+        this.pulseRadiusMax = 3.2 + Math.random() * 0.8; // 3.2-4.0x maximum radius
         this.supernovaTime = 0; // For tracking supernova effect duration
         this.ringScale = 1.0; // For gas giant ring size variation
         this.ringCount = 3; // Number of rings for this gas giant
@@ -432,17 +437,14 @@ class ParticlePool {
 
     update(dt) {
         // Update all active particles and move dead ones back to pool
-        // Use swap-and-pop pattern to avoid splicing
+        // Iterate backwards through the array so removals don't affect indices
         for (let i = this.active.length - 1; i >= 0; i--) {
             const particle = this.active[i];
             particle.update(dt);
 
             if (particle.lifetime <= 0) {
-                // Swap with last element and pop (O(1) removal)
-                const lastParticle = this.active[this.active.length - 1];
-                this.active[i] = lastParticle;
-                this.active.pop();
-                // Return dead particle to pool
+                // Remove particle and return to pool
+                this.active.splice(i, 1);
                 this.available.push(particle);
             }
         }
@@ -1303,16 +1305,17 @@ class Simulator {
 
                 this.ctx.restore();
             } else if (body.bodyType === 'neutron-star') {
-                // Neutron stars: pulsate with brightness
-                // Pulsation frequency: ~0.5 Hz (period of ~2 seconds)
-                const pulsePhase = Math.sin(body.pulseTime * Math.PI) * 0.5 + 0.5; // 0 to 1
-                const glowBrightness = 0.6 + pulsePhase * 0.2; // 0.6 to 0.8
-                const glowRadius = 2.5 + pulsePhase * 0.5; // 2.5 to 3.0x
+                // Neutron stars: pulsate with randomized frequency and intensity per star
+                const pulsePhase = Math.sin(body.pulseTime * Math.PI * body.pulseFrequency) * 0.5 + 0.5; // 0 to 1
+                const brightnessDelta = body.pulseBrightnessMax - body.pulseBrightnessMin;
+                const glowBrightness = body.pulseBrightnessMin + pulsePhase * brightnessDelta;
+                const radiusDelta = body.pulseRadiusMax - body.pulseRadiusMin;
+                const glowRadius = body.pulseRadiusMin + pulsePhase * radiusDelta;
 
-                // Draw outer glow (very bright and blue) - pulsating
+                // Draw outer glow (very bright and blue) - violently pulsating
                 const nsGlowGradient = this.ctx.createRadialGradient(screenX, screenY, screenRadius, screenX, screenY, screenRadius * glowRadius);
                 nsGlowGradient.addColorStop(0, `rgba(100, 220, 255, ${glowBrightness})`);
-                nsGlowGradient.addColorStop(0.4, `rgba(100, 200, 255, ${glowBrightness * 0.4})`);
+                nsGlowGradient.addColorStop(0.4, `rgba(100, 200, 255, ${glowBrightness * 0.5})`);
                 nsGlowGradient.addColorStop(1, 'rgba(100, 180, 255, 0)');
                 this.ctx.fillStyle = nsGlowGradient;
                 this.ctx.beginPath();
@@ -1338,9 +1341,10 @@ class Simulator {
                     this.ctx.fill();
                 }
 
-                // Draw bright inner shine (also pulsates)
+                // Draw bright inner shine (pulsates with same randomization)
+                const shineDelta = 1.0 - body.pulseBrightnessMin;
                 const nsShineGradient = this.ctx.createRadialGradient(screenX - screenRadius * 0.2, screenY - screenRadius * 0.2, 0, screenX, screenY, screenRadius);
-                nsShineGradient.addColorStop(0, `rgba(255, 255, 255, ${0.5 + pulsePhase * 0.3})`);
+                nsShineGradient.addColorStop(0, `rgba(255, 255, 255, ${body.pulseBrightnessMin + pulsePhase * shineDelta})`);
                 nsShineGradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
                 this.ctx.fillStyle = nsShineGradient;
                 this.ctx.beginPath();
@@ -1627,14 +1631,13 @@ class Simulator {
             if (props.particles > 0 && Math.random() < 0.3) {
                 const angle = Math.random() * Math.PI * 2;
                 const speed = 100 + Math.random() * 50;
-                const particle = new Particle(
+                this.particlePool.acquire(
                     effect.explosionX + Math.cos(angle) * screenRadius / this.zoom * 0.7,
                     effect.explosionY + Math.sin(angle) * screenRadius / this.zoom * 0.7,
                     Math.cos(angle) * speed,
                     Math.sin(angle) * speed,
                     0.5
                 );
-                this.particles.push(particle);
             }
         }
 
