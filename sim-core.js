@@ -1,151 +1,216 @@
 // Shared simulation core used by both the browser runtime and Node tests.
 
 (function(globalScope) {
-    const BODY_TYPE_DEFINITIONS = Object.freeze([
+    const MASS_UNIT_LABEL = 'Me';
+    const MASS_REALIZATION_SCALE = 25;
+    const EVOLUTION_RULES = Object.freeze({
+        stellarCollapse: Object.freeze({
+            thresholdMass: 50,
+            blackHoleThresholdMass: 90,
+            neutronStarProfile: 'core-collapse',
+            blackHoleProfile: 'hypernova',
+        }),
+        whiteDwarf: Object.freeze({
+            lowerMass: 0.6,
+            upperMass: 1.4,
+        }),
+        neutronStar: Object.freeze({
+            lowerMass: 8,
+            upperMass: 25,
+            collapseToBlackHoleMass: 30,
+        }),
+        blackHole: Object.freeze({
+            lowerMass: 20,
+        }),
+    });
+    const SPAWN_CLASS_DEFINITIONS = Object.freeze([
         Object.freeze({
             key: 'debris',
             label: 'Debris',
             minMass: 0,
-            maxMass: 5,
-            radiusScale: 2,
-            collisionRadiusMultiplier: 1,
-            mergeDuration: 0.5,
-            emitsExplosionOnMerge: true,
-            spawnable: false,
+            maxMass: 0.05,
+            defaultState: 'debris',
         }),
         Object.freeze({
             key: 'asteroid',
             label: 'Asteroid',
-            minMass: 5,
-            maxMass: 20,
-            radiusScale: 2,
-            collisionRadiusMultiplier: 1,
-            mergeDuration: 0.5,
-            emitsExplosionOnMerge: true,
-            spawnable: true,
+            minMass: 0.05,
+            maxMass: 0.5,
+            defaultState: 'asteroid',
         }),
         Object.freeze({
             key: 'planet',
             label: 'Planet',
-            minMass: 20,
-            maxMass: 60,
-            radiusScale: 2,
-            collisionRadiusMultiplier: 1,
-            mergeDuration: 0.5,
-            emitsExplosionOnMerge: true,
-            spawnable: true,
+            minMass: 0.5,
+            maxMass: 2,
+            defaultState: 'planet',
         }),
         Object.freeze({
             key: 'gas-giant',
             label: 'Gas Giant',
-            minMass: 60,
-            maxMass: 150,
-            radiusScale: 2,
-            collisionRadiusMultiplier: 1,
-            mergeDuration: 0.5,
-            emitsExplosionOnMerge: true,
-            spawnable: true,
+            minMass: 2,
+            maxMass: 10,
+            defaultState: 'gas-giant',
         }),
         Object.freeze({
             key: 'star',
             label: 'Star',
-            minMass: 150,
-            maxMass: 1500,
+            minMass: 10,
+            maxMass: 50,
+            defaultState: 'star',
+        }),
+    ]);
+    const SPAWN_CLASS_CONFIG_BY_KEY = Object.freeze(Object.fromEntries(
+        SPAWN_CLASS_DEFINITIONS.map((definition) => [definition.key, definition])
+    ));
+    const BODY_STATE_DEFINITIONS = Object.freeze([
+        Object.freeze({
+            key: 'debris',
+            label: 'Debris',
             radiusScale: 2,
             collisionRadiusMultiplier: 1,
-            mergeDuration: 0.5,
+            mergeDuration: 0.25,
             emitsExplosionOnMerge: true,
-            spawnable: true,
+            isCompact: false,
+        }),
+        Object.freeze({
+            key: 'asteroid',
+            label: 'Asteroid',
+            radiusScale: 2,
+            collisionRadiusMultiplier: 1,
+            mergeDuration: 0.25,
+            emitsExplosionOnMerge: true,
+            isCompact: false,
+        }),
+        Object.freeze({
+            key: 'planet',
+            label: 'Planet',
+            radiusScale: 2.5,
+            collisionRadiusMultiplier: 1,
+            mergeDuration: 0.25,
+            emitsExplosionOnMerge: true,
+            isCompact: false,
+        }),
+        Object.freeze({
+            key: 'gas-giant',
+            label: 'Gas Giant',
+            radiusScale: 3,
+            collisionRadiusMultiplier: 1,
+            mergeDuration: 0.25,
+            emitsExplosionOnMerge: true,
+            isCompact: false,
+        }),
+        Object.freeze({
+            key: 'star',
+            label: 'Star',
+            radiusScale: 5,
+            collisionRadiusMultiplier: 1,
+            mergeDuration: 0.25,
+            emitsExplosionOnMerge: true,
+            isCompact: false,
+        }),
+        Object.freeze({
+            key: 'white-dwarf',
+            label: 'White Dwarf',
+            radiusScale: 2.2,
+            collisionRadiusMultiplier: 1,
+            mergeDuration: 0.25,
+            emitsExplosionOnMerge: true,
+            isCompact: true,
         }),
         Object.freeze({
             key: 'neutron-star',
             label: 'Neutron Star',
-            minMass: 1500,
-            maxMass: 3000,
-            radiusScale: 0.6,
+            radiusScale: 1.2,
             collisionRadiusMultiplier: 1,
-            mergeDuration: 0.5,
+            mergeDuration: 0.25,
             emitsExplosionOnMerge: true,
-            spawnable: true,
+            isCompact: true,
         }),
         Object.freeze({
             key: 'black-hole',
             label: 'Black Hole',
-            minMass: 3000,
-            maxMass: Infinity,
-            radiusScale: 0.8,
+            radiusScale: 1.6,
             collisionRadiusMultiplier: 0.12,
-            mergeDuration: 0.25,
+            mergeDuration: 0.125,
             emitsExplosionOnMerge: false,
-            spawnable: true,
+            isCompact: true,
         }),
     ]);
-    const BODY_TYPE_CONFIG_BY_KEY = Object.freeze(Object.fromEntries(
-        BODY_TYPE_DEFINITIONS.map((definition) => [definition.key, definition])
+    const BODY_STATE_CONFIG_BY_KEY = Object.freeze(Object.fromEntries(
+        BODY_STATE_DEFINITIONS.map((definition) => [definition.key, definition])
     ));
     const SPAWN_PRESET_DEFINITIONS = Object.freeze([
         Object.freeze({
             key: 'random',
             label: 'Random',
-            minMass: BODY_TYPE_CONFIG_BY_KEY.asteroid.minMass,
-            maxMass: BODY_TYPE_CONFIG_BY_KEY.star.minMass,
+            minMass: SPAWN_CLASS_CONFIG_BY_KEY.asteroid.minMass,
+            maxMass: SPAWN_CLASS_CONFIG_BY_KEY.star.minMass,
             menuOrder: 0,
         }),
         Object.freeze({
             key: 'asteroid',
-            label: BODY_TYPE_CONFIG_BY_KEY.asteroid.label,
-            minMass: BODY_TYPE_CONFIG_BY_KEY.asteroid.minMass,
-            maxMass: BODY_TYPE_CONFIG_BY_KEY.planet.minMass,
-            bodyType: 'asteroid',
+            label: SPAWN_CLASS_CONFIG_BY_KEY.asteroid.label,
+            minMass: SPAWN_CLASS_CONFIG_BY_KEY.asteroid.minMass,
+            maxMass: SPAWN_CLASS_CONFIG_BY_KEY.planet.minMass,
+            bodyState: 'asteroid',
             menuOrder: 1,
         }),
         Object.freeze({
             key: 'planet',
-            label: BODY_TYPE_CONFIG_BY_KEY.planet.label,
-            minMass: BODY_TYPE_CONFIG_BY_KEY.planet.minMass,
-            maxMass: BODY_TYPE_CONFIG_BY_KEY['gas-giant'].minMass,
-            bodyType: 'planet',
+            label: SPAWN_CLASS_CONFIG_BY_KEY.planet.label,
+            minMass: SPAWN_CLASS_CONFIG_BY_KEY.planet.minMass,
+            maxMass: SPAWN_CLASS_CONFIG_BY_KEY['gas-giant'].minMass,
+            bodyState: 'planet',
             menuOrder: 2,
         }),
         Object.freeze({
             key: 'gas-giant',
-            label: BODY_TYPE_CONFIG_BY_KEY['gas-giant'].label,
-            minMass: BODY_TYPE_CONFIG_BY_KEY['gas-giant'].minMass,
-            maxMass: BODY_TYPE_CONFIG_BY_KEY.star.minMass,
-            bodyType: 'gas-giant',
+            label: SPAWN_CLASS_CONFIG_BY_KEY['gas-giant'].label,
+            minMass: SPAWN_CLASS_CONFIG_BY_KEY['gas-giant'].minMass,
+            maxMass: SPAWN_CLASS_CONFIG_BY_KEY.star.minMass,
+            bodyState: 'gas-giant',
             menuOrder: 3,
         }),
         Object.freeze({
             key: 'star',
-            label: BODY_TYPE_CONFIG_BY_KEY.star.label,
-            minMass: BODY_TYPE_CONFIG_BY_KEY.star.minMass,
-            maxMass: BODY_TYPE_CONFIG_BY_KEY['neutron-star'].minMass,
-            bodyType: 'star',
+            label: BODY_STATE_CONFIG_BY_KEY.star.label,
+            minMass: SPAWN_CLASS_CONFIG_BY_KEY.star.minMass,
+            maxMass: SPAWN_CLASS_CONFIG_BY_KEY.star.maxMass,
+            bodyState: 'star',
             menuOrder: 4,
         }),
         Object.freeze({
-            key: 'neutron-star',
-            label: BODY_TYPE_CONFIG_BY_KEY['neutron-star'].label,
-            minMass: BODY_TYPE_CONFIG_BY_KEY['neutron-star'].minMass,
-            maxMass: BODY_TYPE_CONFIG_BY_KEY['black-hole'].minMass,
-            bodyType: 'neutron-star',
+            key: 'white-dwarf',
+            label: BODY_STATE_CONFIG_BY_KEY['white-dwarf'].label,
+            minMass: EVOLUTION_RULES.whiteDwarf.lowerMass,
+            maxMass: EVOLUTION_RULES.whiteDwarf.upperMass,
+            bodyState: 'white-dwarf',
             menuOrder: 5,
         }),
         Object.freeze({
-            key: 'black-hole',
-            label: BODY_TYPE_CONFIG_BY_KEY['black-hole'].label,
-            minMass: BODY_TYPE_CONFIG_BY_KEY['black-hole'].minMass,
-            maxMass: BODY_TYPE_CONFIG_BY_KEY['black-hole'].minMass * 2,
-            bodyType: 'black-hole',
+            key: 'neutron-star',
+            label: BODY_STATE_CONFIG_BY_KEY['neutron-star'].label,
+            minMass: EVOLUTION_RULES.neutronStar.lowerMass,
+            maxMass: EVOLUTION_RULES.neutronStar.upperMass,
+            bodyState: 'neutron-star',
             menuOrder: 6,
+        }),
+        Object.freeze({
+            key: 'black-hole',
+            label: BODY_STATE_CONFIG_BY_KEY['black-hole'].label,
+            minMass: EVOLUTION_RULES.blackHole.lowerMass,
+            maxMass: 120,
+            bodyState: 'black-hole',
+            menuOrder: 7,
         }),
         Object.freeze({
             key: 'supermassive-black-hole',
             label: 'Supermassive BH',
-            minMass: 900000,
-            maxMass: 1100000,
-            bodyType: 'black-hole',
-            menuOrder: 7,
+            minMass: 8000,
+            maxMass: 20000,
+            bodyState: 'black-hole',
+            menuOrder: 8,
         }),
     ]);
     const SPAWN_PRESET_CONFIG_BY_KEY = Object.freeze(Object.fromEntries(
@@ -157,12 +222,25 @@
     }
 
     function getBodyTypeDefinitions() {
-        return BODY_TYPE_DEFINITIONS.map(cloneDefinition);
+        return BODY_STATE_DEFINITIONS.map(cloneDefinition);
     }
 
     function getBodyTypeConfig(bodyType) {
-        const definition = BODY_TYPE_CONFIG_BY_KEY[bodyType];
+        const definition = BODY_STATE_CONFIG_BY_KEY[bodyType];
         return definition ? cloneDefinition(definition) : null;
+    }
+
+    function getSpawnClassDefinitions() {
+        return SPAWN_CLASS_DEFINITIONS.map(cloneDefinition);
+    }
+
+    function getSpawnClassConfig(spawnClass) {
+        const definition = SPAWN_CLASS_CONFIG_BY_KEY[spawnClass];
+        return definition ? cloneDefinition(definition) : null;
+    }
+
+    function getEvolutionRules() {
+        return JSON.parse(JSON.stringify(EVOLUTION_RULES));
     }
 
     function getSpawnPresetDefinitions() {
@@ -194,12 +272,56 @@
         return getRandomMassInRange(preset.minMass, preset.maxMass);
     }
 
-    function getCircularOrbitSpeed(primaryMass, orbitalRadius, gravityConstant = 2) {
+    function getSpawnClassForMass(mass) {
+        for (const definition of SPAWN_CLASS_DEFINITIONS) {
+            if (mass < definition.maxMass) {
+                return definition.key;
+            }
+        }
+
+        return SPAWN_CLASS_DEFINITIONS[SPAWN_CLASS_DEFINITIONS.length - 1].key;
+    }
+
+    function getNaturalBodyStateForMass(mass) {
+        const spawnClass = getSpawnClassForMass(mass);
+        const definition = SPAWN_CLASS_CONFIG_BY_KEY[spawnClass];
+        return definition ? definition.defaultState : 'planet';
+    }
+
+    function resolveCollapsedRemnantState(mass) {
+        if (mass >= EVOLUTION_RULES.stellarCollapse.blackHoleThresholdMass) {
+            return 'black-hole';
+        }
+
+        if (mass >= EVOLUTION_RULES.stellarCollapse.thresholdMass) {
+            return 'neutron-star';
+        }
+
+        return 'star';
+    }
+
+    function getSupernovaProfileForState(state) {
+        if (state === 'black-hole') {
+            return EVOLUTION_RULES.stellarCollapse.blackHoleProfile;
+        }
+
+        if (state === 'neutron-star') {
+            return EVOLUTION_RULES.stellarCollapse.neutronStarProfile;
+        }
+
+        return null;
+    }
+
+    function getRealizedMass(mass, massScale = MASS_REALIZATION_SCALE) {
+        return Math.max(0, mass) * massScale;
+    }
+
+    function getCircularOrbitSpeed(primaryMass, orbitalRadius, gravityConstant = 2, massScale = 1) {
         if (!isFinite(primaryMass) || !isFinite(orbitalRadius) || orbitalRadius <= 0) {
             return 0;
         }
 
-        return Math.sqrt((gravityConstant * primaryMass) / orbitalRadius);
+        return Math.sqrt((gravityConstant * getRealizedMass(primaryMass, massScale)) / orbitalRadius);
     }
 
     function getBlackHoleRenderMetrics(screenRadius) {
@@ -252,11 +374,20 @@
             this.ax = 0;
             this.ay = 0;
             this.bodyType = bodyType;
+            this.state = bodyType;
+            this.spawnClass = null;
+            this.evolutionStage = 'stable';
+            this.supernovaProfile = null;
             this.rotationAngle = Math.random() * Math.PI * 2;
             this.rotationSpeed = (Math.random() - 0.5) * 0.15;
             this.pulseTime = 0;
             this.supernovaTime = 0;
             this.isAnchored = false;
+        }
+
+        setState(nextState) {
+            this.bodyType = nextState;
+            this.state = nextState;
         }
 
         applyForce(fx, fy) {
@@ -363,7 +494,7 @@
     }
 
     class SupernovaEffect {
-        constructor(x, y, body = null, duration = 15.0) {
+        constructor(x, y, body = null, duration = 7.5) {
             this.x = x;
             this.y = y;
             this.body = body;
@@ -373,14 +504,15 @@
             this.explosionY = y;
             this.explosionLocked = false;
 
-            this.phase1Duration = 2.0;
-            this.phase2Duration = 0.5;
+            this.phase1Duration = 1.0;
+            this.phase2Duration = 0.25;
             this.phase3Start = this.phase1Duration + this.phase2Duration;
-            this.phase3Duration = 3.0;
+            this.phase3Duration = 1.5;
             this.phase4Duration = this.duration - this.phase3Start - this.phase3Duration;
 
             if (this.body) {
                 this.body.supernovaTime = this.duration;
+                this.body.evolutionStage = 'supernova';
             }
         }
 
@@ -462,8 +594,52 @@
         }
     }
 
+    class AccretionBurstEffect {
+        constructor(x, y, body = null, duration = 1.5) {
+            this.x = x;
+            this.y = y;
+            this.body = body;
+            this.time = 0;
+            this.duration = duration;
+            this.trackDuration = duration * 0.5;
+            this.lockedX = x;
+            this.lockedY = y;
+            this.positionLocked = false;
+        }
+
+        update(dt) {
+            this.time += dt;
+
+            if (this.body && this.time < this.trackDuration) {
+                this.x = this.body.x;
+                this.y = this.body.y;
+                return;
+            }
+
+            if (!this.positionLocked) {
+                this.positionLocked = true;
+                this.lockedX = this.x;
+                this.lockedY = this.y;
+            }
+        }
+
+        getProperties() {
+            const phase = Math.min(1, this.time / this.duration);
+            const brightness = Math.max(0, 1 - phase);
+            return {
+                radius: 80 + phase * 220,
+                brightness,
+                ringWidth: 12 + phase * 10,
+            };
+        }
+
+        isDone() {
+            return this.time >= this.duration;
+        }
+    }
+
     class MergeEffect {
-        constructor(body1, body2, mergedBody, duration = 1.0) {
+        constructor(body1, body2, mergedBody, duration = 0.5) {
             this.body1 = body1;
             this.body2 = body2;
             this.mergedBody = mergedBody;
@@ -480,6 +656,9 @@
 
             this.body1.isMerging = true;
             this.body2.isMerging = true;
+            this.body1.evolutionStage = 'merging';
+            this.body2.evolutionStage = 'merging';
+            this.mergedBody.evolutionStage = 'forming';
         }
 
         update(dt) {
@@ -508,8 +687,13 @@
         finish() {
             this.body1.isMerging = false;
             this.body2.isMerging = false;
+            this.body1.evolutionStage = 'stable';
+            this.body2.evolutionStage = 'stable';
             this.mergedBody.mergeScale = 1;
             this.mergedBody.mergeAlpha = 1;
+            if (this.mergedBody.evolutionStage === 'forming') {
+                this.mergedBody.evolutionStage = 'stable';
+            }
         }
     }
 
@@ -522,46 +706,47 @@
             this.bodies = [];
             this.particlePool = new ParticlePool(1000);
             this.supernovaEffects = [];
+            this.accretionBurstEffects = [];
             this.mergeEffects = [];
             this.running = true;
             this.gravityConstant = 2;
-            this.timeScale = 2;
+            this.timeScale = 1;
 
             this.darkMatterX = 0;
             this.darkMatterY = 0;
             this.darkMatterMass = 50;
             this.darkMatterStrength = 1.5;
             this.bodyTypeDefinitions = getBodyTypeDefinitions();
+            this.spawnClassDefinitions = getSpawnClassDefinitions();
             this.spawnPresetDefinitions = getSpawnPresetDefinitions();
+            this.massUnitLabel = MASS_UNIT_LABEL;
+            this.massRealizationScale = MASS_REALIZATION_SCALE;
             this.massThresholds = {
-                asteroid: BODY_TYPE_CONFIG_BY_KEY.asteroid.minMass,
-                planet: BODY_TYPE_CONFIG_BY_KEY.planet.minMass,
-                gasGiant: BODY_TYPE_CONFIG_BY_KEY['gas-giant'].minMass,
-                star: BODY_TYPE_CONFIG_BY_KEY.star.minMass,
-                neutronStar: BODY_TYPE_CONFIG_BY_KEY['neutron-star'].minMass,
-                blackHole: BODY_TYPE_CONFIG_BY_KEY['black-hole'].minMass,
+                asteroid: SPAWN_CLASS_CONFIG_BY_KEY.asteroid.minMass,
+                planet: SPAWN_CLASS_CONFIG_BY_KEY.planet.minMass,
+                gasGiant: SPAWN_CLASS_CONFIG_BY_KEY['gas-giant'].minMass,
+                star: SPAWN_CLASS_CONFIG_BY_KEY.star.minMass,
+                neutronStar: EVOLUTION_RULES.stellarCollapse.thresholdMass,
+                blackHole: EVOLUTION_RULES.stellarCollapse.blackHoleThresholdMass,
             };
         }
 
         getBodyType(mass) {
-            for (let i = BODY_TYPE_DEFINITIONS.length - 1; i >= 0; i--) {
-                const definition = BODY_TYPE_DEFINITIONS[i];
-                if (mass >= definition.minMass) {
-                    return definition.key;
-                }
-            }
-
-            return BODY_TYPE_DEFINITIONS[0].key;
+            return getNaturalBodyStateForMass(mass);
         }
 
-        getRadiusFromMass(mass) {
-            const bodyType = this.getBodyType(mass);
-            const bodyConfig = BODY_TYPE_CONFIG_BY_KEY[bodyType] || BODY_TYPE_CONFIG_BY_KEY.planet;
-            return Math.cbrt(mass) * bodyConfig.radiusScale;
+        getRadiusFromMass(mass, bodyType = null) {
+            const resolvedBodyType = bodyType || this.getBodyType(mass);
+            const bodyConfig = BODY_STATE_CONFIG_BY_KEY[resolvedBodyType] || BODY_STATE_CONFIG_BY_KEY.planet;
+            return Math.cbrt(Math.max(mass, 0)) * bodyConfig.radiusScale;
         }
 
         getBodyConfig(bodyType) {
             return getBodyTypeConfig(bodyType);
+        }
+
+        getSpawnClassConfig(spawnClass) {
+            return getSpawnClassConfig(spawnClass);
         }
 
         getSpawnPresetConfig(presetKey) {
@@ -572,13 +757,55 @@
             return getRandomMassForPreset(presetKey);
         }
 
-        spawnPlanet(x, y, mass = null) {
+        getEvolutionRules() {
+            return getEvolutionRules();
+        }
+
+        getSpawnClassForMass(mass) {
+            return getSpawnClassForMass(mass);
+        }
+
+        getBodyStateForMass(mass) {
+            return getNaturalBodyStateForMass(mass);
+        }
+
+        resolveMergedBodyState(body1, body2, totalMass) {
+            const states = [body1.bodyType, body2.bodyType];
+
+            if (states.includes('black-hole')) {
+                return 'black-hole';
+            }
+
+            if (states.includes('neutron-star')) {
+                return totalMass >= EVOLUTION_RULES.neutronStar.collapseToBlackHoleMass ? 'black-hole' : 'neutron-star';
+            }
+
+            if (states.includes('white-dwarf')) {
+                if (totalMass >= EVOLUTION_RULES.stellarCollapse.thresholdMass) {
+                    return resolveCollapsedRemnantState(totalMass);
+                }
+                if (totalMass >= SPAWN_CLASS_CONFIG_BY_KEY.star.minMass) {
+                    return 'star';
+                }
+                return 'white-dwarf';
+            }
+
+            const naturalState = this.getBodyStateForMass(totalMass);
+            if (naturalState === 'star' && totalMass >= EVOLUTION_RULES.stellarCollapse.thresholdMass) {
+                return resolveCollapsedRemnantState(totalMass);
+            }
+
+            return naturalState;
+        }
+
+        spawnPlanet(x, y, mass = null, bodyType = null) {
             if (mass === null) {
                 mass = this.getRandomMassForPreset('random');
             }
 
-            const radius = this.getRadiusFromMass(mass);
-            const bodyType = this.getBodyType(mass);
+            const resolvedBodyType = bodyType || this.getBodyStateForMass(mass);
+            const radius = this.getRadiusFromMass(mass, resolvedBodyType);
+            const spawnClass = this.getSpawnClassForMass(mass);
 
             const radialAngle = Math.atan2(y, x);
             const orbitalDirection = Math.random() < 0.5 ? Math.PI / 2 : -Math.PI / 2;
@@ -589,14 +816,21 @@
             const vx = Math.cos(velocityAngle) * speed;
             const vy = Math.sin(velocityAngle) * speed;
 
-            const body = this.createBody(x, y, vx, vy, mass, radius, '#ffffff', bodyType);
+            const body = this.createBody(x, y, vx, vy, mass, radius, '#ffffff', resolvedBodyType);
+            if (typeof body.setState === 'function') {
+                body.setState(resolvedBodyType);
+            } else {
+                body.bodyType = resolvedBodyType;
+                body.state = resolvedBodyType;
+            }
+            body.spawnClass = spawnClass;
             this.bodies.push(body);
             return body;
         }
 
         spawnBlackHole(x, y) {
             const mass = this.getRandomMassForPreset('black-hole');
-            return this.spawnPlanet(x, y, mass);
+            return this.spawnPlanet(x, y, mass, 'black-hole');
         }
 
         spawnRandomCluster(x, y, count = 5) {
@@ -607,11 +841,12 @@
                 const py = y + Math.sin(angle) * distance;
                 const vx = Math.random() * 200 - 100;
                 const vy = Math.random() * 200 - 100;
-                const mass = Math.random() * 145 + 5;
-                const radius = this.getRadiusFromMass(mass);
-                const bodyType = this.getBodyType(mass);
+                const mass = this.getRandomMassForPreset('random');
+                const bodyType = this.getBodyStateForMass(mass);
+                const radius = this.getRadiusFromMass(mass, bodyType);
 
                 const body = this.createBody(px, py, vx, vy, mass, radius, '#ffffff', bodyType);
+                body.spawnClass = this.getSpawnClassForMass(mass);
                 this.bodies.push(body);
             }
         }
@@ -633,7 +868,7 @@
                     const distSq = dx * dx + dy * dy + 100;
                     const dist = Math.sqrt(distSq);
 
-                    const force = (this.gravityConstant * b1.mass * b2.mass) / distSq;
+                    const force = (this.gravityConstant * b1.mass * b2.mass * this.massRealizationScale) / distSq;
                     const fx = (force * dx) / dist;
                     const fy = (force * dy) / dist;
 
@@ -674,8 +909,18 @@
                 if (effect.isDone()) {
                     if (effect.body) {
                         effect.body.supernovaTime = 0;
+                        effect.body.evolutionStage = 'stable';
                     }
                     this.supernovaEffects.splice(i, 1);
+                }
+            }
+
+            for (let i = this.accretionBurstEffects.length - 1; i >= 0; i--) {
+                const effect = this.accretionBurstEffects[i];
+                effect.update(dt);
+
+                if (effect.isDone()) {
+                    this.accretionBurstEffects.splice(i, 1);
                 }
             }
 
@@ -712,8 +957,8 @@
                     const dy = b2.y - b1.y;
                     const dist = Math.sqrt(dx * dx + dy * dy);
 
-                    const b1Config = BODY_TYPE_CONFIG_BY_KEY[b1.bodyType] || BODY_TYPE_CONFIG_BY_KEY.planet;
-                    const b2Config = BODY_TYPE_CONFIG_BY_KEY[b2.bodyType] || BODY_TYPE_CONFIG_BY_KEY.planet;
+                    const b1Config = BODY_STATE_CONFIG_BY_KEY[b1.bodyType] || BODY_STATE_CONFIG_BY_KEY.planet;
+                    const b2Config = BODY_STATE_CONFIG_BY_KEY[b2.bodyType] || BODY_STATE_CONFIG_BY_KEY.planet;
                     const r1 = b1.radius * b1Config.collisionRadiusMultiplier;
                     const r2 = b2.radius * b2Config.collisionRadiusMultiplier;
                     const minDist = r1 + r2;
@@ -726,8 +971,8 @@
                     let newX = (b1.x * b1.mass + b2.x * b2.mass) / totalMass;
                     let newY = (b1.y * b1.mass + b2.y * b2.mass) / totalMass;
 
-                    const newRadius = this.getRadiusFromMass(totalMass);
-                    const newBodyType = this.getBodyType(totalMass);
+                    const newBodyType = this.resolveMergedBodyState(b1, b2, totalMass);
+                    const newRadius = this.getRadiusFromMass(totalMass, newBodyType);
                     const oldBodyType = b1.bodyType;
 
                     const i1 = (2 / 5) * b1.mass * b1.radius * b1.radius;
@@ -747,13 +992,17 @@
                     }
 
                     const mergedBody = this.createBody(newX, newY, newVx, newVy, totalMass, newRadius, '#fff', newBodyType);
+                    if (typeof mergedBody.setState === 'function') {
+                        mergedBody.setState(newBodyType);
+                    }
+                    mergedBody.spawnClass = this.getSpawnClassForMass(totalMass);
                     mergedBody.rotationSpeed = newRotationSpeed;
                     mergedBody.mergeScale = 0;
                     mergedBody.mergeAlpha = 0;
                     mergedBody.isAnchored = Boolean(anchoredBody);
                     this.bodies.push(mergedBody);
 
-                    const newBodyConfig = BODY_TYPE_CONFIG_BY_KEY[newBodyType] || BODY_TYPE_CONFIG_BY_KEY.planet;
+                    const newBodyConfig = BODY_STATE_CONFIG_BY_KEY[newBodyType] || BODY_STATE_CONFIG_BY_KEY.planet;
                     const mergeDuration = newBodyConfig.mergeDuration;
                     this.mergeEffects.push(new MergeEffect(b1, b2, mergedBody, mergeDuration));
 
@@ -762,7 +1011,15 @@
                         this.createExplosion(newX, newY, totalMass, explosionIntensity);
                     }
 
-                    if (newBodyType === 'neutron-star' && oldBodyType === 'star') {
+                    const mergedStates = [b1.bodyType, b2.bodyType];
+                    const involvesBlackHole = mergedStates.includes('black-hole');
+                    const involvesStar = mergedStates.includes('star');
+
+                    if (involvesBlackHole && involvesStar) {
+                        mergedBody.supernovaProfile = 'accretion-burst';
+                        this.createAccretionBurst(newX, newY, mergedBody);
+                    } else if ((newBodyType === 'neutron-star' || newBodyType === 'black-hole') && involvesStar) {
+                        mergedBody.supernovaProfile = getSupernovaProfileForState(newBodyType);
                         this.createSupernovaWithBody(newX, newY, newRadius, mergedBody);
                     }
 
@@ -797,7 +1054,7 @@
         }
 
         createSupernovaWithBody(x, y, radius, body) {
-            this.supernovaEffects.push(new SupernovaEffect(x, y, body, 15.0));
+            this.supernovaEffects.push(new SupernovaEffect(x, y, body, 7.5));
             this.createExplosion(x, y, 50, 2.5);
         }
 
@@ -805,10 +1062,16 @@
             this.createSupernovaWithBody(x, y, radius, null);
         }
 
+        createAccretionBurst(x, y, body = null) {
+            this.accretionBurstEffects.push(new AccretionBurstEffect(x, y, body, 1.5));
+            this.createExplosion(x, y, 12, 1.2);
+        }
+
         clearAll() {
             this.bodies = [];
             this.particlePool.clear();
             this.supernovaEffects = [];
+            this.accretionBurstEffects = [];
             this.mergeEffects = [];
         }
 
@@ -822,8 +1085,19 @@
         Particle,
         ParticlePool,
         SupernovaEffect,
+        AccretionBurstEffect,
         MergeEffect,
         SimulationCore,
+        MASS_UNIT_LABEL,
+        MASS_REALIZATION_SCALE,
+        getEvolutionRules,
+        getSpawnClassDefinitions,
+        getSpawnClassConfig,
+        getSpawnClassForMass,
+        getNaturalBodyStateForMass,
+        resolveCollapsedRemnantState,
+        getSupernovaProfileForState,
+        getRealizedMass,
         getBodyTypeDefinitions,
         getBodyTypeConfig,
         getSpawnPresetDefinitions,
