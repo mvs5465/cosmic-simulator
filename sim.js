@@ -1850,5 +1850,10 @@ document.getElementById('dark-matter-slider').addEventListener('input', (e) => {
     document.getElementById('dark-matter-value').textContent = sim.darkMatterStrength.toFixed(1);
 });
 
+document.getElementById('zoom-slider').addEventListener('input', (e) => {
+    sim.zoom = parseFloat(e.target.value);
+    document.getElementById('zoom-value').textContent = sim.zoom.toFixed(1) + 'x';
+});
+
 // Start the animation loop
 sim.animate();
