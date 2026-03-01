@@ -403,9 +403,9 @@ class ParticlePool {
         this.available = [];
         this.active = [];
 
-        // Pre-allocate particles
+        // Pre-allocate particles with dummy lifetime
         for (let i = 0; i < initialSize; i++) {
-            this.available.push(new Particle(0, 0, 0, 0, 0));
+            this.available.push(new Particle(0, 0, 0, 0, 1));
         }
     }
 
@@ -432,13 +432,17 @@ class ParticlePool {
 
     update(dt) {
         // Update all active particles and move dead ones back to pool
+        // Use swap-and-pop pattern to avoid splicing
         for (let i = this.active.length - 1; i >= 0; i--) {
             const particle = this.active[i];
             particle.update(dt);
 
             if (particle.lifetime <= 0) {
-                // Move back to available pool
-                this.active.splice(i, 1);
+                // Swap with last element and pop (O(1) removal)
+                const lastParticle = this.active[this.active.length - 1];
+                this.active[i] = lastParticle;
+                this.active.pop();
+                // Return dead particle to pool
                 this.available.push(particle);
             }
         }
