@@ -17,15 +17,37 @@ class Body {
         this.rotationSpeed = (Math.random() - 0.5) * 0.15;
         this.pulseTime = 0; // For neutron star pulsation
         this.supernovaTime = 0; // For tracking supernova effect duration
+        this.ringScale = 1.0; // For gas giant ring size variation
+        this.ringCount = 3; // Number of rings for this gas giant
+        this.ringOpacities = [0.85, 0.85, 0.85]; // Per-ring opacity variation
+        this.ringVisible = [true, true, true]; // Per-ring visibility
+        this.ringHueShift = 0; // For gas giant ring color variation
+        this.ringLightness = 50; // For gas giant ring brightness variation
+        this.asteroidVertices = null; // For asteroid shapes
 
         if (bodyType === 'planet') {
             this.texture = this.generateEarthTexture(radius);
         } else if (bodyType === 'gas-giant') {
             this.texture = this.generateGasGiantTexture(radius);
+            // Randomize all ring properties for every gas giant (biased towards fainter)
+            this.ringScale = 0.5 + Math.random() * 1.0; // 0.5 to 1.5
+            // Random number of rings: 1-5
+            this.ringCount = Math.floor(Math.random() * 5) + 1;
+            // Randomize opacity per ring independently
+            this.ringOpacities = [];
+            this.ringVisible = [];
+            for (let i = 0; i < this.ringCount; i++) {
+                this.ringOpacities.push(0.1 + Math.random() * Math.random() * 0.25);
+                this.ringVisible.push(Math.random() < 0.5); // 50% chance each ring is visible
+            }
+            this.ringHueShift = Math.random() * 40 - 20; // -20 to +20 hue shift
+            this.ringLightness = 35 + Math.random() * 20; // 35 to 55 lightness
         } else if (bodyType === 'star') {
             this.texture = this.generateStarTexture(radius, mass);
         } else if (bodyType === 'asteroid') {
             this.texture = this.generateAsteroidTexture(radius);
+            // Generate irregular asteroid shape
+            this.asteroidVertices = this.generateAsteroidShape(radius);
         } else if (bodyType === 'neutron-star') {
             this.texture = this.generateNeutronStarTexture(radius);
         } else if (bodyType === 'black-hole') {
@@ -191,6 +213,23 @@ class Body {
         }
 
         return canvas;
+    }
+
+    generateAsteroidShape(radius = this.radius) {
+        // Generate an irregular polygon for asteroid shape
+        const numVertices = Math.floor(Math.random() * 4) + 6; // 6-9 vertices
+        const vertices = [];
+
+        for (let i = 0; i < numVertices; i++) {
+            const angle = (i / numVertices) * Math.PI * 2;
+            // Randomize radius at each vertex for irregular shape
+            const randomRadius = radius * (0.7 + Math.random() * 0.6); // 0.7 to 1.3x radius
+            const x = Math.cos(angle) * randomRadius;
+            const y = Math.sin(angle) * randomRadius;
+            vertices.push({ x, y });
+        }
+
+        return vertices;
     }
 
     generateNeutronStarTexture(radius = this.radius) {
@@ -549,7 +588,7 @@ class Simulator {
         this.darkMatterX = 0;
         this.darkMatterY = 0;
         this.darkMatterMass = 50; // Strong, hidden influence
-        this.darkMatterStrength = 3; // Multiplier for the attractor force (10x stronger)
+        this.darkMatterStrength = 1.5; // Multiplier for the attractor force
 
         // Mass thresholds for body types (global unified system)
         this.massThresholds = {
@@ -834,10 +873,25 @@ class Simulator {
                         mergedBody.texture = mergedBody.generateEarthTexture(newRadius);
                     } else if (newBodyType === 'gas-giant') {
                         mergedBody.texture = mergedBody.generateGasGiantTexture(newRadius);
+                        // Randomize all ring properties for merged gas giant (biased towards fainter)
+                        mergedBody.ringScale = 0.5 + Math.random() * 1.0; // 0.5 to 1.5
+                        // Random number of rings: 1-5
+                        mergedBody.ringCount = Math.floor(Math.random() * 5) + 1;
+                        // Randomize opacity per ring independently
+                        mergedBody.ringOpacities = [];
+                        mergedBody.ringVisible = [];
+                        for (let i = 0; i < mergedBody.ringCount; i++) {
+                            mergedBody.ringOpacities.push(0.1 + Math.random() * Math.random() * 0.25);
+                            mergedBody.ringVisible.push(Math.random() < 0.5); // 50% chance each ring is visible
+                        }
+                        mergedBody.ringHueShift = Math.random() * 40 - 20; // -20 to +20 hue shift
+                        mergedBody.ringLightness = 35 + Math.random() * 20; // 35 to 55 lightness
                     } else if (newBodyType === 'star') {
                         mergedBody.texture = mergedBody.generateStarTexture(newRadius, totalMass);
                     } else if (newBodyType === 'asteroid') {
                         mergedBody.texture = mergedBody.generateAsteroidTexture(newRadius);
+                        // Generate irregular shape for merged asteroid
+                        mergedBody.asteroidVertices = mergedBody.generateAsteroidShape(newRadius);
                     } else if (newBodyType === 'neutron-star') {
                         mergedBody.texture = mergedBody.generateNeutronStarTexture(newRadius);
                     } else if (newBodyType === 'black-hole') {
@@ -883,11 +937,11 @@ class Simulator {
         this.ctx.fillStyle = '#000000';
         this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
 
+        // Draw dark matter effect FIRST (lowest layer, behind everything)
+        this.drawDarkMatterEffect();
+
         // Draw starfield background
         this.drawStarfield();
-
-        // Draw dark matter effect (subtle, vague distortion)
-        this.drawDarkMatterEffect();
 
         // Draw grid (optional)
         this.drawGrid();
@@ -949,26 +1003,54 @@ class Simulator {
                 this.ctx.arc(screenX, screenY, Math.max(screenRadius, 1.5), 0, Math.PI * 2);
                 this.ctx.fill();
             } else if (body.bodyType === 'asteroid') {
-                // Asteroids with texture
-                if (body.texture) {
-                    this.ctx.save();
-                    this.ctx.translate(screenX, screenY);
-                    this.ctx.rotate(body.rotationAngle);
+                // Asteroids with irregular shapes
+                this.ctx.save();
+                this.ctx.translate(screenX, screenY);
+                this.ctx.rotate(body.rotationAngle);
 
-                    // Clip to circle
+                if (body.asteroidVertices && body.asteroidVertices.length > 0) {
+                    // Draw irregular polygon shape
+                    const scaleFactor = screenRadius / body.radius;
+
+                    this.ctx.fillStyle = '#999999';
+                    this.ctx.beginPath();
+                    const firstVertex = body.asteroidVertices[0];
+                    this.ctx.moveTo(firstVertex.x * scaleFactor, firstVertex.y * scaleFactor);
+
+                    for (let i = 1; i < body.asteroidVertices.length; i++) {
+                        const vertex = body.asteroidVertices[i];
+                        this.ctx.lineTo(vertex.x * scaleFactor, vertex.y * scaleFactor);
+                    }
+                    this.ctx.closePath();
+                    this.ctx.fill();
+
+                    // Draw craters on top
+                    this.ctx.fillStyle = '#666666';
+                    for (let i = 0; i < 2; i++) {
+                        const angle = Math.random() * Math.PI * 2;
+                        const distance = screenRadius * (0.4 + Math.random() * 0.3);
+                        const craterX = Math.cos(angle) * distance;
+                        const craterY = Math.sin(angle) * distance;
+                        const craterSize = screenRadius * (0.1 + Math.random() * 0.1);
+                        this.ctx.beginPath();
+                        this.ctx.arc(craterX, craterY, craterSize, 0, Math.PI * 2);
+                        this.ctx.fill();
+                    }
+                } else if (body.texture) {
+                    // Fallback to textured circle
                     this.ctx.beginPath();
                     this.ctx.arc(0, 0, screenRadius, 0, Math.PI * 2);
                     this.ctx.clip();
-
                     this.ctx.drawImage(body.texture, -screenRadius, -screenRadius, screenRadius * 2, screenRadius * 2);
-                    this.ctx.restore();
                 } else {
-                    // Fallback
+                    // Fallback circle
                     this.ctx.fillStyle = '#999999';
                     this.ctx.beginPath();
-                    this.ctx.arc(screenX, screenY, screenRadius, 0, Math.PI * 2);
+                    this.ctx.arc(0, 0, screenRadius, 0, Math.PI * 2);
                     this.ctx.fill();
                 }
+
+                this.ctx.restore();
             } else if (body.bodyType === 'star') {
                 // Calculate star color based on mass (same as texture)
                 const massRange = 1500 - 60;
@@ -1080,6 +1162,48 @@ class Simulator {
                 this.ctx.beginPath();
                 this.ctx.arc(screenX, screenY, screenRadius, 0, Math.PI * 2);
                 this.ctx.fill();
+
+                // Draw rings for all gas giants with randomized properties
+                this.ctx.save();
+                this.ctx.translate(screenX, screenY);
+                this.ctx.rotate(body.rotationAngle);
+
+                // Generate ring radii based on ring count
+                const minRingRadius = screenRadius * 1.3;
+                const maxRingRadius = screenRadius * 2.6;
+                const ringRadii = [];
+                for (let i = 0; i < body.ringCount; i++) {
+                    const ringProgress = body.ringCount === 1 ? 0.5 : i / (body.ringCount - 1);
+                    const ringRadius = minRingRadius + (maxRingRadius - minRingRadius) * ringProgress;
+                    ringRadii.push(ringRadius * body.ringScale);
+                }
+
+                const ringWidth = screenRadius * 0.25;
+
+                for (let ringIdx = 0; ringIdx < ringRadii.length; ringIdx++) {
+                    // Skip rendering this ring if not visible
+                    if (!body.ringVisible[ringIdx]) {
+                        continue;
+                    }
+
+                    const ringRadius = ringRadii[ringIdx];
+
+                    // Randomized color per body
+                    const hue = 35 + body.ringHueShift + ringIdx * 5; // Base hue + shift + per-ring variation
+                    const saturation = 60 + Math.random() * 30; // 60 to 90
+                    const lightness = body.ringLightness + ringIdx * 4; // Per-body base lightness + per-ring variation
+                    const opacity = body.ringOpacities[ringIdx]; // Per-ring opacity
+
+                    // Draw ring as a circle with stroke
+                    this.ctx.strokeStyle = `hsla(${hue}, ${saturation}%, ${lightness}%, ${opacity})`;
+                    this.ctx.lineWidth = ringWidth;
+                    this.ctx.lineCap = 'round';
+                    this.ctx.beginPath();
+                    this.ctx.arc(0, 0, ringRadius, 0, Math.PI * 2);
+                    this.ctx.stroke();
+                }
+
+                this.ctx.restore();
             } else if (body.bodyType === 'neutron-star') {
                 // Neutron stars: pulsate with brightness
                 // Pulsation frequency: ~0.5 Hz (period of ~2 seconds)
@@ -1243,47 +1367,65 @@ class Simulator {
     }
 
     drawDarkMatterEffect() {
-        // Draw subtle, vague dark matter distortion effect centered at origin
-        // Creates rippling waves and gravitational lensing appearance
+        // Draw dark matter nebula cloud swirl centered at origin
         const centerScreenX = (0 - this.cameraX) * this.zoom;
         const centerScreenY = (0 - this.cameraY) * this.zoom;
 
-        // Only draw if center is on screen
-        if (centerScreenX < -500 || centerScreenX > this.canvas.width + 500 ||
-            centerScreenY < -500 || centerScreenY > this.canvas.height + 500) {
+        // Only draw if center is reasonably on screen
+        if (centerScreenX < -1000 || centerScreenX > this.canvas.width + 1000 ||
+            centerScreenY < -1000 || centerScreenY > this.canvas.height + 1000) {
             return;
         }
 
-        // Draw concentric rings of dark matter influence (very subtle)
-        this.ctx.globalAlpha = 0.04; // Very faint
+        const time = Date.now() * 0.0003; // Slower rotation
 
-        // Multiple ring layers for depth
-        for (let i = 1; i <= 5; i++) {
-            const ringRadius = i * 150 * this.zoom;
+        this.ctx.globalAlpha = 0.225; // Halfway between
 
-            // Subtle wave effect
-            const waveAmount = Math.sin(Date.now() * 0.0005 + i) * 20;
+        // Draw many small cloud particles to create nebula effect
+        const cloudParticles = 3000;
 
-            this.ctx.strokeStyle = 'rgba(100, 150, 255, 0.3)';
-            this.ctx.lineWidth = 1;
-            this.ctx.beginPath();
-            this.ctx.arc(centerScreenX, centerScreenY, ringRadius + waveAmount, 0, Math.PI * 2);
-            this.ctx.stroke();
-        }
+        for (let i = 0; i < cloudParticles; i++) {
+            // Use noise-like distribution via seeded random
+            const seed = i * 0.618; // Golden ratio for better distribution
+            const angle = (seed * 12.9898) % (Math.PI * 2);
 
-        // Add subtle particle dust field around center
-        this.ctx.fillStyle = 'rgba(80, 120, 255, 0.15)';
-        for (let i = 0; i < 30; i++) {
-            const angle = (i / 30) * Math.PI * 2 + Date.now() * 0.0001 * i;
-            const distance = 100 + Math.sin(Date.now() * 0.0003 + i) * 80;
-            const x = centerScreenX + Math.cos(angle) * distance * this.zoom;
-            const y = centerScreenY + Math.sin(angle) * distance * this.zoom;
-            const size = 1 + Math.sin(Date.now() * 0.0005 + i) * 0.5;
+            // Spiral distribution with randomness - 3x bigger radius
+            const spiralPhase = (seed * 0.5 + time) % (Math.PI * 2);
+            const distanceFromCenter = (Math.sin(spiralPhase + i * 0.01) * 0.5 + 0.5) * 1200 * this.zoom;
 
+            // Add turbulent offset
+            const turbulence = Math.sin(i * 0.1 + time) * Math.sin(i * 0.05 + time * 0.7);
+            const offsetX = Math.cos(angle + time) * turbulence * 150;
+            const offsetY = Math.sin(angle + time) * turbulence * 150;
+
+            const x = centerScreenX + Math.cos(spiralPhase - time) * distanceFromCenter + offsetX;
+            const y = centerScreenY + Math.sin(spiralPhase - time) * distanceFromCenter + offsetY;
+
+            // Distance from center determines opacity
+            const distFromCenter = Math.sqrt((x - centerScreenX) ** 2 + (y - centerScreenY) ** 2);
+            const maxDist = 1200 * this.zoom;
+            const opacity = Math.max(0, 0.6 * (1 - distFromCenter / maxDist));
+
+            // Variable particle size for cloud effect
+            const size = 2 + Math.sin(i * 0.033 + time) * 1.5;
+
+            // Dark matter - halfway between grey and black
+            this.ctx.fillStyle = `rgba(35, 35, 47, ${opacity * 1.25})`;
             this.ctx.beginPath();
             this.ctx.arc(x, y, size, 0, Math.PI * 2);
             this.ctx.fill();
         }
+
+        // Large central glow - dark matter (2x larger)
+        const glowRadius = 1200 * this.zoom;
+        const glowGradient = this.ctx.createRadialGradient(centerScreenX, centerScreenY, 0, centerScreenX, centerScreenY, glowRadius);
+        glowGradient.addColorStop(0, 'rgba(45, 45, 57, 0.325)');
+        glowGradient.addColorStop(0.5, 'rgba(40, 40, 52, 0.15)');
+        glowGradient.addColorStop(1, 'rgba(35, 35, 47, 0)');
+        this.ctx.fillStyle = glowGradient;
+        this.ctx.beginPath();
+        this.ctx.arc(centerScreenX, centerScreenY, glowRadius, 0, Math.PI * 2);
+        this.ctx.fill();
 
         this.ctx.globalAlpha = 1;
     }
@@ -1463,8 +1605,8 @@ class Simulator {
     }
 
     createExplosion(x, y, mass, intensity = 1.0) {
-        // Create an explosion proportional to mass with some randomness
-        const baseParticleCount = Math.max(2, mass * 0.2); // More massive collisions = more particles (10x less)
+        // Create an explosion proportional to mass with some randomness, capped to prevent lag
+        const baseParticleCount = Math.max(2, Math.min(mass * 0.2, 80)); // Cap at 80 particles
         const particleCount = Math.floor(baseParticleCount * (0.7 + Math.random() * 0.6)); // ±30% randomness
 
         const baseSpeed = 20;
