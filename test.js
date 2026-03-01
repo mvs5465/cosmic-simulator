@@ -50,6 +50,7 @@ class BrowserTestRunner {
 const output = document.getElementById('test-output');
 const tests = new BrowserTestRunner(output);
 const {
+    getSpawnPresetDefinitions: getSpawnPresetDefinitionsForTest,
     getCircularOrbitSpeed: getCircularOrbitSpeedForTest,
     getBlackHoleRenderMetrics: getBlackHoleRenderMetricsForTest,
     shouldRenderBlackHoleFlares: shouldRenderBlackHoleFlaresForTest,
@@ -61,6 +62,7 @@ tests.test('runtime exports are available', function() {
     this.assert(typeof SupernovaEffect === 'function', 'SupernovaEffect should be defined');
     this.assert(typeof seedScenario === 'function', 'seedScenario should be defined');
     this.assert(typeof bootstrapSimulatorApp === 'function', 'bootstrapSimulatorApp should be defined');
+    this.assert(typeof getSpawnPresetDefinitionsForTest === 'function', 'getSpawnPresetDefinitions should be defined');
 });
 
 tests.test('test page does not auto-bootstrap the full app', function() {
@@ -120,6 +122,25 @@ tests.test('sandbox scenario seeding creates the expected starting bodies', func
     seedScenario(sim, 'sandbox');
 
     this.assert(sim.bodies.length === 2, `expected two seeded bodies, got ${sim.bodies.length}`);
+});
+
+tests.test('spawn presets expose the menu options from shared config', function() {
+    const presetKeys = getSpawnPresetDefinitionsForTest().map((preset) => preset.key);
+    const expectedKeys = [
+        'random',
+        'asteroid',
+        'planet',
+        'gas-giant',
+        'star',
+        'neutron-star',
+        'black-hole',
+        'supermassive-black-hole',
+    ];
+
+    this.assert(
+        JSON.stringify(presetKeys) === JSON.stringify(expectedKeys),
+        `expected shared preset keys ${expectedKeys.join(', ')}, got ${presetKeys.join(', ')}`
+    );
 });
 
 tests.test('solar-system scenario seeds a central star and orbiting planets', function() {
