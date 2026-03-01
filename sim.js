@@ -662,6 +662,7 @@ class Simulator {
         this.resizeCanvas();
         window.addEventListener('resize', () => this.resizeCanvas());
         window.addEventListener('click', (e) => this.handleClick(e));
+        this.setupInputControls();
     }
 
     getBodyType(mass) {
@@ -730,6 +731,41 @@ class Simulator {
                 this.spawnPlanet(worldX, worldY, Math.random() * 3000 + 3000);
                 break;
         }
+    }
+
+    setupInputControls() {
+        let isPanning = false;
+        let panStartX = 0;
+        let panStartY = 0;
+
+        this.canvas.addEventListener('mousedown', (e) => {
+            isPanning = true;
+            panStartX = e.clientX;
+            panStartY = e.clientY;
+        });
+
+        document.addEventListener('mousemove', (e) => {
+            if (isPanning) {
+                const deltaX = e.clientX - panStartX;
+                const deltaY = e.clientY - panStartY;
+                this.cameraX -= deltaX / this.zoom;
+                this.cameraY -= deltaY / this.zoom;
+                panStartX = e.clientX;
+                panStartY = e.clientY;
+            }
+        });
+
+        document.addEventListener('mouseup', () => {
+            isPanning = false;
+        });
+
+        // Scroll wheel zoom
+        this.canvas.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
+            this.zoom *= zoomFactor;
+            this.zoom = Math.max(0.1, Math.min(this.zoom, 10)); // Clamp zoom 0.1 to 10
+        });
     }
 
     spawnPlanet(x, y, mass = null) {
@@ -1803,10 +1839,6 @@ document.getElementById('btn-play-pause').addEventListener('click', (e) => {
 
 document.getElementById('btn-clear').addEventListener('click', () => {
     sim.clearAll();
-});
-
-document.getElementById('btn-reset').addEventListener('click', () => {
-    sim.resetView();
 });
 
 // Sliders
