@@ -909,9 +909,16 @@ class Simulator {
                 const dy = b2.y - b1.y;
                 const dist = Math.sqrt(dx * dx + dy * dy);
 
-                // For black holes, use event horizon radius (12% of visual radius)
-                const r1 = b1.bodyType === 'black-hole' ? b1.radius * 0.12 : b1.radius;
-                const r2 = b2.bodyType === 'black-hole' ? b2.radius * 0.12 : b2.radius;
+                // Collision radius based on body type (not visual glow, just the body itself)
+                const getCollisionRadius = (body) => {
+                    if (body.bodyType === 'black-hole') {
+                        return body.radius * 0.12; // Event horizon
+                    }
+                    // All other bodies collide at their actual radius, ignoring glows/halos
+                    return body.radius;
+                };
+                const r1 = getCollisionRadius(b1);
+                const r2 = getCollisionRadius(b2);
                 const minDist = r1 + r2;
 
                 if (dist < minDist) {
