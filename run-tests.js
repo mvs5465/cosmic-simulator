@@ -3,6 +3,7 @@
 const {
     SimulationCore,
     SupernovaEffect,
+    getCircularOrbitSpeed,
     getBlackHoleRenderMetrics,
     shouldRenderBlackHoleFlares,
     shouldDrawVelocityVector,
@@ -82,6 +83,11 @@ tests.test('getRadiusFromMass uses compact scaling for neutron stars and black h
     this.assertEqual(sim.getRadiusFromMass(125), Math.cbrt(125) * 2, 0.001, 'standard body radius');
     this.assertEqual(sim.getRadiusFromMass(1600), Math.cbrt(1600) * 0.6, 0.001, 'neutron star radius');
     this.assertEqual(sim.getRadiusFromMass(4000), Math.cbrt(4000) * 0.8, 0.001, 'black hole radius');
+});
+
+tests.test('getCircularOrbitSpeed matches the shared gravity model', function() {
+    this.assertEqual(getCircularOrbitSpeed(500, 200, 2), Math.sqrt(5), 0.001, 'orbit speed should follow sqrt(GM/r)');
+    this.assertEqual(getCircularOrbitSpeed(500, 0, 2), 0, 0.001, 'zero radius should be clamped');
 });
 
 tests.test('spawnBlackHole creates an actual black hole under current thresholds', function() {
@@ -203,6 +209,22 @@ tests.test('dark matter origin case keeps acceleration finite', function() {
 
     this.assert(Number.isFinite(body.ax), 'ax should remain finite');
     this.assert(Number.isFinite(body.ay), 'ay should remain finite');
+});
+
+tests.test('anchored bodies stay fixed under force and update', function() {
+    const sim = new SimulationCore();
+    const body = sim.spawnPlanet(0, 0, 200);
+    body.isAnchored = true;
+    body.vx = 12;
+    body.vy = -8;
+
+    body.applyForce(1000, -500);
+    body.update(0.5);
+
+    this.assertEqual(body.x, 0, 0.001, 'anchored body x');
+    this.assertEqual(body.y, 0, 0.001, 'anchored body y');
+    this.assertEqual(body.vx, 0, 0.001, 'anchored body vx');
+    this.assertEqual(body.vy, 0, 0.001, 'anchored body vy');
 });
 
 tests.test('createExplosion populates the particle pool', function() {

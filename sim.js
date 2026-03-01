@@ -8,6 +8,7 @@ const {
     Body,
     SupernovaEffect,
     SimulationCore,
+    getCircularOrbitSpeed,
     getBlackHoleRenderMetrics,
     shouldRenderBlackHoleFlares,
     shouldDrawVelocityVector,
@@ -1301,10 +1302,7 @@ class Simulator extends SimulationCore {
     }
 }
 
-function bootstrapSimulatorApp() {
-    const canvas = document.getElementById('canvas');
-    const sim = new Simulator(canvas);
-
+function seedSandboxScenario(sim) {
     const mass1 = Math.random() * 145 + 5;
     const mass2 = Math.random() * 145 + 5;
     sim.spawnPlanet(-200, -150, mass1);
@@ -1319,6 +1317,72 @@ function bootstrapSimulatorApp() {
     const speed2 = Math.random() * 30 + 20;
     sim.bodies[1].vx = Math.cos(angle2) * speed2;
     sim.bodies[1].vy = Math.sin(angle2) * speed2;
+}
+
+function seedSolarSystemScenario(sim) {
+    sim.darkMatterStrength = 0;
+
+    const starMass = Math.random() * 1200 + sim.massThresholds.star;
+    const star = sim.spawnPlanet(0, 0, starMass);
+    star.vx = 0;
+    star.vy = 0;
+
+    const planetCount = Math.floor(Math.random() * 5) + 1;
+    let orbitalDistance = star.radius + 60;
+
+    for (let i = 0; i < planetCount; i++) {
+        const mass = Math.random() * 145 + 5;
+        const angle = Math.random() * Math.PI * 2;
+        const x = Math.cos(angle) * orbitalDistance;
+        const y = Math.sin(angle) * orbitalDistance;
+        const body = sim.spawnPlanet(x, y, mass);
+        const orbitalSpeed = getCircularOrbitSpeed(star.mass, orbitalDistance, sim.gravityConstant);
+        const tangentialDirection = Math.random() < 0.5 ? 1 : -1;
+        const tangentX = -Math.sin(angle) * tangentialDirection;
+        const tangentY = Math.cos(angle) * tangentialDirection;
+
+        body.vx = tangentX * orbitalSpeed;
+        body.vy = tangentY * orbitalSpeed;
+
+        const separation = 40 + Math.random() * 40;
+        orbitalDistance += body.radius * 2 + separation;
+    }
+}
+
+function seedScenario(sim, scenarioName = 'sandbox') {
+    if (scenarioName === 'sandbox') {
+        seedSandboxScenario(sim);
+        return;
+    }
+
+    if (scenarioName === 'solar-system') {
+        seedSolarSystemScenario(sim);
+        return;
+    }
+
+    throw new Error(`Unknown scenario: ${scenarioName}`);
+}
+
+function syncControlState(sim) {
+    const speedSlider = document.getElementById('speed-slider');
+    const gravitySlider = document.getElementById('gravity-slider');
+    const darkMatterSlider = document.getElementById('dark-matter-slider');
+    const speedValue = document.getElementById('speed-value');
+    const gravityValue = document.getElementById('gravity-value');
+    const darkMatterValue = document.getElementById('dark-matter-value');
+
+    if (speedSlider) speedSlider.value = String(sim.timeScale);
+    if (gravitySlider) gravitySlider.value = String(sim.gravityConstant);
+    if (darkMatterSlider) darkMatterSlider.value = String(sim.darkMatterStrength);
+    if (speedValue) speedValue.textContent = sim.timeScale.toFixed(1) + 'x';
+    if (gravityValue) gravityValue.textContent = sim.gravityConstant.toFixed(1);
+    if (darkMatterValue) darkMatterValue.textContent = sim.darkMatterStrength.toFixed(1);
+}
+
+function bootstrapSimulatorApp(scenarioName = 'sandbox') {
+    const canvas = document.getElementById('canvas');
+    const sim = new Simulator(canvas);
+    seedScenario(sim, scenarioName);
 
     document.getElementById('btn-play-pause').addEventListener('click', (e) => {
         sim.running = !sim.running;
@@ -1351,32 +1415,13 @@ function bootstrapSimulatorApp() {
         document.getElementById('dark-matter-value').textContent = sim.darkMatterStrength.toFixed(1);
     });
 
+    syncControlState(sim);
     sim.animate();
     return sim;
-}
-
-function hasAppShell() {
-    const requiredIds = [
-        'canvas',
-        'btn-play-pause',
-        'btn-clear',
-        'btn-reset-zoom',
-        'speed-slider',
-        'gravity-slider',
-        'dark-matter-slider',
-        'speed-value',
-        'gravity-value',
-        'dark-matter-value',
-    ];
-
-    return requiredIds.every((id) => document.getElementById(id));
 }
 
 globalThis.Simulator = Simulator;
 globalThis.Body = BrowserBody;
 globalThis.SupernovaEffect = SupernovaEffect;
+globalThis.seedScenario = seedScenario;
 globalThis.bootstrapSimulatorApp = bootstrapSimulatorApp;
-
-if (hasAppShell()) {
-    globalThis.sim = bootstrapSimulatorApp();
-}

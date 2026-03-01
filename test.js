@@ -50,6 +50,7 @@ class BrowserTestRunner {
 const output = document.getElementById('test-output');
 const tests = new BrowserTestRunner(output);
 const {
+    getCircularOrbitSpeed: getCircularOrbitSpeedForTest,
     getBlackHoleRenderMetrics: getBlackHoleRenderMetricsForTest,
     shouldRenderBlackHoleFlares: shouldRenderBlackHoleFlaresForTest,
 } = window.CosmicSimulatorCore;
@@ -58,6 +59,7 @@ tests.test('runtime exports are available', function() {
     this.assert(typeof Simulator === 'function', 'Simulator should be defined');
     this.assert(typeof Body === 'function', 'Body should be defined');
     this.assert(typeof SupernovaEffect === 'function', 'SupernovaEffect should be defined');
+    this.assert(typeof seedScenario === 'function', 'seedScenario should be defined');
     this.assert(typeof bootstrapSimulatorApp === 'function', 'bootstrapSimulatorApp should be defined');
 });
 
@@ -107,6 +109,54 @@ tests.test('draw runs without throwing for a minimal scene', function() {
     sim.draw();
 
     this.assert(true, 'draw completed');
+});
+
+tests.test('sandbox scenario seeding creates the expected starting bodies', function() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 800;
+    canvas.height = 600;
+
+    const sim = new Simulator(canvas);
+    seedScenario(sim, 'sandbox');
+
+    this.assert(sim.bodies.length === 2, `expected two seeded bodies, got ${sim.bodies.length}`);
+});
+
+tests.test('solar-system scenario seeds a central star and orbiting planets', function() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 800;
+    canvas.height = 600;
+
+    const sim = new Simulator(canvas);
+    seedScenario(sim, 'solar-system');
+
+    this.assert(sim.darkMatterStrength === 0, `expected no dark matter, got ${sim.darkMatterStrength}`);
+    this.assert(sim.bodies.length >= 2 && sim.bodies.length <= 6,
+        `expected 2-6 total bodies, got ${sim.bodies.length}`);
+
+    const star = sim.bodies[0];
+    this.assert(star.bodyType === 'star', `expected central star, got ${star.bodyType}`);
+    this.assert(star.isAnchored === false, 'central star should not be anchored');
+    this.assert(star.x === 0 && star.y === 0, `expected star at origin, got (${star.x}, ${star.y})`);
+    this.assert(star.vx === 0 && star.vy === 0, `expected stationary star, got (${star.vx}, ${star.vy})`);
+
+    for (let i = 1; i < sim.bodies.length; i++) {
+        const body = sim.bodies[i];
+        this.assert(
+            body.bodyType === 'asteroid' || body.bodyType === 'planet' || body.bodyType === 'gas-giant',
+            `expected orbital body type asteroid/planet/gas-giant, got ${body.bodyType}`
+        );
+
+        const distance = Math.hypot(body.x, body.y);
+        const radialDotVelocity = body.x * body.vx + body.y * body.vy;
+        const expectedSpeed = getCircularOrbitSpeedForTest(star.mass, distance, sim.gravityConstant);
+        const actualSpeed = Math.hypot(body.vx, body.vy);
+
+        this.assert(distance > star.radius, `expected planet outside star radius, got distance ${distance}`);
+        this.assert(Math.abs(radialDotVelocity) < 0.001, `expected tangential velocity, got dot ${radialDotVelocity}`);
+        this.assert(Math.abs(actualSpeed - expectedSpeed) < 0.001,
+            `expected orbital speed ${expectedSpeed}, got ${actualSpeed}`);
+    }
 });
 
 tests.test('black-hole merge keeps flare detail visible on the merged body during the active merge', function() {

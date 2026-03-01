@@ -1,6 +1,14 @@
 // Shared simulation core used by both the browser runtime and Node tests.
 
 (function(globalScope) {
+    function getCircularOrbitSpeed(primaryMass, orbitalRadius, gravityConstant = 2) {
+        if (!isFinite(primaryMass) || !isFinite(orbitalRadius) || orbitalRadius <= 0) {
+            return 0;
+        }
+
+        return Math.sqrt((gravityConstant * primaryMass) / orbitalRadius);
+    }
+
     function getBlackHoleRenderMetrics(screenRadius) {
         const normalizedRadius = Math.max(screenRadius, 1);
         const coreRadius = normalizedRadius * 0.24;
@@ -55,14 +63,29 @@
             this.rotationSpeed = (Math.random() - 0.5) * 0.15;
             this.pulseTime = 0;
             this.supernovaTime = 0;
+            this.isAnchored = false;
         }
 
         applyForce(fx, fy) {
+            if (this.isAnchored) {
+                return;
+            }
+
             this.ax += fx / this.mass;
             this.ay += fy / this.mass;
         }
 
         update(dt) {
+            if (this.isAnchored) {
+                this.ax = 0;
+                this.ay = 0;
+                this.vx = 0;
+                this.vy = 0;
+                this.rotationAngle += this.rotationSpeed;
+                this.pulseTime += dt;
+                return;
+            }
+
             this.vx += this.ax * dt;
             this.vy += this.ay * dt;
             this.x += this.vx * dt;
@@ -495,10 +518,10 @@
                     if (dist >= minDist) continue;
 
                     const totalMass = b1.mass + b2.mass;
-                    const newVx = (b1.vx * b1.mass + b2.vx * b2.mass) / totalMass;
-                    const newVy = (b1.vy * b1.mass + b2.vy * b2.mass) / totalMass;
-                    const newX = (b1.x * b1.mass + b2.x * b2.mass) / totalMass;
-                    const newY = (b1.y * b1.mass + b2.y * b2.mass) / totalMass;
+                    let newVx = (b1.vx * b1.mass + b2.vx * b2.mass) / totalMass;
+                    let newVy = (b1.vy * b1.mass + b2.vy * b2.mass) / totalMass;
+                    let newX = (b1.x * b1.mass + b2.x * b2.mass) / totalMass;
+                    let newY = (b1.y * b1.mass + b2.y * b2.mass) / totalMass;
 
                     const newRadius = this.getRadiusFromMass(totalMass);
                     const newBodyType = this.getBodyType(totalMass);
@@ -511,11 +534,20 @@
                     const totalAngularMomentum = l1 + l2;
                     const newInertia = (2 / 5) * totalMass * newRadius * newRadius;
                     const newRotationSpeed = newInertia > 0 ? totalAngularMomentum / newInertia : 0;
+                    const anchoredBody = b1.isAnchored ? b1 : (b2.isAnchored ? b2 : null);
+
+                    if (anchoredBody) {
+                        newX = anchoredBody.x;
+                        newY = anchoredBody.y;
+                        newVx = 0;
+                        newVy = 0;
+                    }
 
                     const mergedBody = this.createBody(newX, newY, newVx, newVy, totalMass, newRadius, '#fff', newBodyType);
                     mergedBody.rotationSpeed = newRotationSpeed;
                     mergedBody.mergeScale = 0;
                     mergedBody.mergeAlpha = 0;
+                    mergedBody.isAnchored = Boolean(anchoredBody);
                     this.bodies.push(mergedBody);
 
                     const mergeDuration = newBodyType === 'black-hole' ? 0.25 : 0.5;
@@ -588,6 +620,7 @@
         SupernovaEffect,
         MergeEffect,
         SimulationCore,
+        getCircularOrbitSpeed,
         getBlackHoleRenderMetrics,
         shouldRenderBlackHoleFlares,
         shouldDrawVelocityVector,
