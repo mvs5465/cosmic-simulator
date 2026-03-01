@@ -3,6 +3,10 @@
 const {
     SimulationCore,
     SupernovaEffect,
+    getBlackHoleRenderMetrics,
+    shouldRenderBlackHoleFlares,
+    shouldDrawVelocityVector,
+    getBodyMergeVisualState,
 } = require('./sim-core.js');
 
 class TestRunner {
@@ -88,6 +92,44 @@ tests.test('spawnBlackHole creates an actual black hole under current thresholds
     this.assert(sim.bodies.length === 1, 'expected one body');
     this.assert(body.bodyType === 'black-hole', `expected black-hole, got ${body.bodyType}`);
     this.assert(body.mass >= sim.massThresholds.blackHole, 'mass should be at or above black-hole threshold');
+});
+
+tests.test('black-hole render metrics keep the disk outside the core', function() {
+    const metrics = getBlackHoleRenderMetrics(120);
+
+    this.assertEqual(metrics.coreRadius, 28.8, 0.001, 'core radius should match shared ratio');
+    this.assertEqual(metrics.diskInnerRadius, 60, 0.001, 'disk inner radius should match shared ratio');
+    this.assertEqual(metrics.diskOuterRadius, 120, 0.001, 'disk outer radius should match shared ratio');
+    this.assert(metrics.coreRadius < metrics.diskInnerRadius, 'core should be inside the disk');
+    this.assert(metrics.diskInnerRadius < metrics.diskOuterRadius, 'disk should have visible thickness');
+});
+
+tests.test('black-hole flares are suppressed while a merge is in progress', function() {
+    const stableBody = { bodyType: 'black-hole' };
+    const mergingBody = { bodyType: 'black-hole', isMerging: true };
+    const mergedBodyFadingIn = { bodyType: 'black-hole', mergeScale: 0.5, mergeAlpha: 0.5 };
+
+    this.assert(shouldRenderBlackHoleFlares(stableBody), 'stable black holes should render flares');
+    this.assert(!shouldRenderBlackHoleFlares(mergingBody), 'merging black holes should not render flares');
+    this.assert(shouldRenderBlackHoleFlares(mergedBodyFadingIn), 'the merged black hole should render flares while fading in');
+});
+
+tests.test('velocity vectors are not drawn for black holes', function() {
+    const fastPlanet = { bodyType: 'planet', vx: 20, vy: 0 };
+    const fastBlackHole = { bodyType: 'black-hole', vx: 20, vy: 0 };
+
+    this.assert(shouldDrawVelocityVector(fastPlanet), 'fast non-black-hole bodies should draw vectors');
+    this.assert(!shouldDrawVelocityVector(fastBlackHole), 'black holes should not draw vectors');
+});
+
+tests.test('merge visual state defaults and respects merge animation values', function() {
+    const defaultState = getBodyMergeVisualState({});
+    const mergedState = getBodyMergeVisualState({ mergeScale: 0.4, mergeAlpha: 0.25 });
+
+    this.assertEqual(defaultState.scale, 1, 0.001, 'default scale');
+    this.assertEqual(defaultState.alpha, 1, 0.001, 'default alpha');
+    this.assertEqual(mergedState.scale, 0.4, 0.001, 'merge scale should be preserved');
+    this.assertEqual(mergedState.alpha, 0.25, 0.001, 'merge alpha should be preserved');
 });
 
 tests.test('collision creates a merged body and merge effect', function() {
