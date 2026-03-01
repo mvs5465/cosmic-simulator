@@ -8,6 +8,8 @@ const {
     Body,
     SupernovaEffect,
     SimulationCore,
+    getBodyTypeConfig,
+    getSpawnPresetDefinitions,
     getCircularOrbitSpeed,
     getBlackHoleRenderMetrics,
     shouldRenderBlackHoleFlares,
@@ -147,8 +149,11 @@ class BrowserBody extends Body {
         canvas.width = size;
         canvas.height = size;
         const ctx = canvas.getContext('2d');
-        const massRange = 1500 - 60;
-        const massFraction = Math.max(0, Math.min((mass - 60) / massRange, 1));
+        const starConfig = getBodyTypeConfig('star');
+        const starMinMass = starConfig ? starConfig.minMass : 150;
+        const starMaxMass = starConfig ? starConfig.maxMass : 1500;
+        const massRange = Math.max(1, starMaxMass - starMinMass);
+        const massFraction = Math.max(0, Math.min((mass - starMinMass) / massRange, 1));
         let red;
         let green;
         let blue;
@@ -377,32 +382,12 @@ class Simulator extends SimulationCore {
         const worldY = (canvasY / this.zoom) + this.cameraY;
 
         const spawnType = document.getElementById('spawn-type').value;
-        switch (spawnType) {
-            case 'random':
-                this.spawnPlanet(worldX, worldY, Math.random() * 140 + 5);
-                break;
-            case 'asteroid':
-                this.spawnPlanet(worldX, worldY, Math.random() * 15 + 5);
-                break;
-            case 'planet':
-                this.spawnPlanet(worldX, worldY, Math.random() * 40 + 20);
-                break;
-            case 'gas-giant':
-                this.spawnPlanet(worldX, worldY, Math.random() * 90 + 60);
-                break;
-            case 'star':
-                this.spawnPlanet(worldX, worldY, Math.random() * 1350 + 150);
-                break;
-            case 'neutron-star':
-                this.spawnPlanet(worldX, worldY, Math.random() * 1500 + 1500);
-                break;
-            case 'black-hole':
-                this.spawnPlanet(worldX, worldY, Math.random() * 3000 + 3000);
-                break;
-            case 'supermassive-black-hole':
-                this.spawnPlanet(worldX, worldY, Math.random() * 200000 + 900000);
-                break;
+        const spawnPreset = this.getSpawnPresetConfig(spawnType);
+        if (!spawnPreset) {
+            return;
         }
+
+        this.spawnPlanet(worldX, worldY, this.getRandomMassForPreset(spawnType));
     }
 
     setupInputControls() {
@@ -1303,8 +1288,8 @@ class Simulator extends SimulationCore {
 }
 
 function seedSandboxScenario(sim) {
-    const mass1 = Math.random() * 145 + 5;
-    const mass2 = Math.random() * 145 + 5;
+    const mass1 = sim.getRandomMassForPreset('random');
+    const mass2 = sim.getRandomMassForPreset('random');
     sim.spawnPlanet(-200, -150, mass1);
     sim.spawnPlanet(200, 150, mass2);
 
@@ -1322,7 +1307,7 @@ function seedSandboxScenario(sim) {
 function seedSolarSystemScenario(sim) {
     sim.darkMatterStrength = 0;
 
-    const starMass = Math.random() * 1200 + sim.massThresholds.star;
+    const starMass = sim.getRandomMassForPreset('star');
     const star = sim.spawnPlanet(0, 0, starMass);
     star.vx = 0;
     star.vy = 0;
@@ -1331,7 +1316,7 @@ function seedSolarSystemScenario(sim) {
     let orbitalDistance = star.radius + 60;
 
     for (let i = 0; i < planetCount; i++) {
-        const mass = Math.random() * 145 + 5;
+        const mass = sim.getRandomMassForPreset('random');
         const angle = Math.random() * Math.PI * 2;
         const x = Math.cos(angle) * orbitalDistance;
         const y = Math.sin(angle) * orbitalDistance;
@@ -1379,8 +1364,23 @@ function syncControlState(sim) {
     if (darkMatterValue) darkMatterValue.textContent = sim.darkMatterStrength.toFixed(1);
 }
 
+function populateSpawnTypeOptions() {
+    const spawnTypeSelect = document.getElementById('spawn-type');
+    if (!spawnTypeSelect || spawnTypeSelect.options.length > 0) {
+        return;
+    }
+
+    for (const preset of getSpawnPresetDefinitions()) {
+        const option = document.createElement('option');
+        option.value = preset.key;
+        option.textContent = preset.label;
+        spawnTypeSelect.appendChild(option);
+    }
+}
+
 function bootstrapSimulatorApp(scenarioName = 'sandbox') {
     const canvas = document.getElementById('canvas');
+    populateSpawnTypeOptions();
     const sim = new Simulator(canvas);
     seedScenario(sim, scenarioName);
 

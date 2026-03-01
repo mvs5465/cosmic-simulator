@@ -3,6 +3,8 @@
 const {
     SimulationCore,
     SupernovaEffect,
+    getBodyTypeConfig,
+    getSpawnPresetConfig,
     getCircularOrbitSpeed,
     getBlackHoleRenderMetrics,
     shouldRenderBlackHoleFlares,
@@ -75,6 +77,20 @@ tests.test('getBodyType uses current production thresholds', function() {
             `mass ${testCase.mass} should classify as ${testCase.expected}`
         );
     }
+});
+
+tests.test('body type and spawn preset config share the same boundaries', function() {
+    const asteroid = getBodyTypeConfig('asteroid');
+    const planet = getBodyTypeConfig('planet');
+    const gasGiant = getBodyTypeConfig('gas-giant');
+    const random = getSpawnPresetConfig('random');
+    const star = getSpawnPresetConfig('star');
+
+    this.assert(asteroid.minMass === 5, 'asteroid min mass should stay configurable at 5');
+    this.assert(planet.minMass === asteroid.maxMass, 'planet should start where asteroid ends');
+    this.assert(gasGiant.minMass === planet.maxMass, 'gas giant should start where planet ends');
+    this.assert(random.minMass === asteroid.minMass, 'random preset should start at asteroid minimum');
+    this.assert(random.maxMass === star.minMass, 'random preset should stop before star masses');
 });
 
 tests.test('getRadiusFromMass uses compact scaling for neutron stars and black holes', function() {
