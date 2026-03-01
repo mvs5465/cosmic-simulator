@@ -27,9 +27,10 @@
         .launch-screen {
             min-height: 100vh;
             display: flex;
-            align-items: center;
+            align-items: flex-start;
             justify-content: center;
-            padding: 32px;
+            padding: 20px;
+            overflow-y: auto;
             background:
                 radial-gradient(circle at top right, rgba(251, 191, 36, 0.12), transparent 32%),
                 radial-gradient(circle at left 20% bottom 15%, rgba(124, 58, 237, 0.18), transparent 28%),
@@ -37,10 +38,10 @@
         }
 
         .launch-panel {
-            width: min(680px, 100%);
-            padding: 36px;
+            width: min(860px, 100%);
+            padding: 28px;
             border: 1px solid rgba(148, 163, 184, 0.16);
-            border-radius: 24px;
+            border-radius: 20px;
             background:
                 linear-gradient(155deg, rgba(15, 18, 41, 0.96), rgba(10, 14, 39, 0.92));
             box-shadow: 0 32px 80px rgba(2, 6, 23, 0.6);
@@ -55,29 +56,29 @@
         }
 
         .launch-title {
-            font-size: clamp(36px, 7vw, 64px);
+            font-size: clamp(30px, 6vw, 56px);
             line-height: 0.95;
-            margin-bottom: 14px;
+            margin-bottom: 10px;
         }
 
         .launch-copy {
-            max-width: 480px;
-            font-size: 14px;
-            line-height: 1.6;
+            max-width: 620px;
+            font-size: 13px;
+            line-height: 1.5;
             color: #94a3b8;
-            margin-bottom: 28px;
+            margin-bottom: 20px;
         }
 
         .scenario-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-            gap: 16px;
-            margin-bottom: 24px;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 12px;
+            margin-bottom: 18px;
         }
 
         .scenario-card {
-            padding: 22px;
-            border-radius: 18px;
+            padding: 18px;
+            border-radius: 14px;
             border: 1px solid rgba(124, 58, 237, 0.28);
             background:
                 radial-gradient(circle at top right, rgba(124, 58, 237, 0.2), transparent 40%),
@@ -93,15 +94,15 @@
         }
 
         .scenario-name {
-            font-size: 24px;
-            margin-bottom: 8px;
+            font-size: 20px;
+            margin-bottom: 6px;
         }
 
         .scenario-description {
             color: #94a3b8;
-            font-size: 13px;
-            line-height: 1.6;
-            margin-bottom: 14px;
+            font-size: 12px;
+            line-height: 1.5;
+            margin-bottom: 12px;
         }
 
         .launch-actions {
@@ -276,7 +277,7 @@
             <h1 class="launch-title">Cosmic<br>Simulator</h1>
             <p class="launch-copy">
                 Start from a curated setup instead of dropping directly into the sandbox.
-                Pick the freeform sandbox or start with a generated solar system that already has planets in orbit.
+                Pick the freeform sandbox, start with a generated solar system, or drop into a chaotic globular cluster.
             </p>
 
             <div class="scenario-grid">
@@ -299,6 +300,16 @@
                     </p>
                     <button data-scenario="solar-system">Launch Solar System</button>
                 </article>
+
+                <article class="scenario-card">
+                    <div class="scenario-label">Chaotic Scenario</div>
+                    <h2 class="scenario-name">Globular Cluster</h2>
+                    <p class="scenario-description">
+                        Generates a dense swarm of stars with tangential-biased motion around the origin.
+                        The cluster extends beyond the default view, but fits inside the fully zoomed-out frame.
+                    </p>
+                    <button data-scenario="globular-cluster">Launch Globular Cluster</button>
+                </article>
             </div>
 
             <div class="launch-actions">
@@ -312,6 +323,16 @@
 
         <div class="sidebar">
             <div class="section">
+                <div class="section-title">Navigation</div>
+                <button id="btn-main-menu">Main Menu</button>
+            </div>
+
+            <div class="section">
+                <div class="section-title">Scenario</div>
+                <div id="scenario-controls" class="section"></div>
+            </div>
+
+            <div class="section">
                 <div class="section-title">Spawn Body</div>
                 <select id="spawn-type"></select>
             </div>
@@ -321,7 +342,6 @@
                 <button id="btn-play-pause">Pause</button>
                 <button id="btn-clear">Clear All</button>
                 <button id="btn-reset-zoom">Reset Zoom</button>
-                <button id="btn-main-menu">Main Menu</button>
             </div>
 
             <div class="section">
@@ -379,21 +399,69 @@
         const launchScreen = document.getElementById('launch-screen');
         const appShell = document.getElementById('app-shell');
         const mainMenuButton = document.getElementById('btn-main-menu');
+        const scenarioControls = document.getElementById('scenario-controls');
         const scenarioButtons = Array.from(document.querySelectorAll('[data-scenario]'));
-
         function resetControlUi() {
             const playPauseButton = document.getElementById('btn-play-pause');
             playPauseButton.textContent = 'Pause';
             playPauseButton.classList.remove('active');
         }
 
-        function showLaunchScreen() {
+        function clearScenarioControls() {
+            scenarioControls.textContent = '';
+        }
+
+        function renderScenarioControls(scenarioName) {
+            clearScenarioControls();
+
+            if (scenarioName === 'solar-system') {
+                const regenerateButton = document.createElement('button');
+                regenerateButton.id = 'btn-regenerate-scenario';
+                regenerateButton.textContent = 'Regenerate System';
+                regenerateButton.addEventListener('click', () => {
+                    startScenario('solar-system');
+                });
+                scenarioControls.appendChild(regenerateButton);
+                return;
+            }
+
+            if (scenarioName === 'globular-cluster') {
+                const regenerateButton = document.createElement('button');
+                regenerateButton.id = 'btn-regenerate-scenario';
+                regenerateButton.textContent = 'Regenerate Cluster';
+                regenerateButton.addEventListener('click', () => {
+                    startScenario('globular-cluster');
+                });
+                scenarioControls.appendChild(regenerateButton);
+            }
+        }
+
+        function destroyActiveSimulation() {
             if (window.sim && typeof window.sim.destroy === 'function') {
                 window.sim.destroy();
             }
 
             window.sim = undefined;
+        }
+
+        function startScenario(scenarioName) {
+            destroyActiveSimulation();
             resetControlUi();
+            renderScenarioControls(scenarioName);
+
+            scenarioButtons.forEach((button) => {
+                button.disabled = true;
+            });
+
+            launchScreen.classList.add('hidden');
+            appShell.classList.remove('hidden');
+            window.sim = bootstrapSimulatorApp(scenarioName);
+        }
+
+        function showLaunchScreen() {
+            destroyActiveSimulation();
+            resetControlUi();
+            clearScenarioControls();
             appShell.classList.add('hidden');
             launchScreen.classList.remove('hidden');
 
@@ -404,15 +472,7 @@
 
         scenarioButtons.forEach((button) => {
             button.addEventListener('click', () => {
-                const scenarioName = button.dataset.scenario;
-
-                scenarioButtons.forEach((candidate) => {
-                    candidate.disabled = true;
-                });
-
-                launchScreen.classList.add('hidden');
-                appShell.classList.remove('hidden');
-                window.sim = bootstrapSimulatorApp(scenarioName);
+                startScenario(button.dataset.scenario);
             });
         });
 

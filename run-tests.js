@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 
 const {
+    Body,
     SimulationCore,
     AccretionBurstEffect,
+    KilonovaEffect,
     SupernovaEffect,
     getSpawnClassConfig,
     getSpawnPresetConfig,
@@ -60,6 +62,20 @@ class TestRunner {
 }
 
 const tests = new TestRunner();
+
+tests.test('body motion records a capped trail history', function() {
+    const body = new Body(0, 0, 10, 0, 1, 2.5, '#fff', 'planet');
+    body.maxTrailPoints = 4;
+    body.trailMinSegmentLength = 1;
+
+    for (let i = 0; i < 5; i++) {
+        body.update(0.2);
+    }
+
+    this.assert(body.trailPoints.length === 4, `expected capped trail length of 4, got ${body.trailPoints.length}`);
+    this.assert(body.trailPoints[0].x > 0, 'oldest trail point should roll forward when capped');
+    this.assertEqual(body.trailPoints[body.trailPoints.length - 1].x, body.x, 0.001, 'latest trail point should match current x');
+});
 
 tests.test('getBodyType uses current production thresholds', function() {
     const sim = new SimulationCore();
@@ -259,6 +275,36 @@ tests.test('star merging into a black hole creates an accretion burst instead of
     this.assert(sim.bodies[0].supernovaProfile === 'accretion-burst', 'merged black hole should track the burst profile');
 });
 
+tests.test('black holes create accretion bursts when consuming non-stellar bodies too', function() {
+    const sim = new SimulationCore();
+    const blackHoleMass = 20;
+    const planetMass = 1;
+    const radius = sim.getRadiusFromMass(blackHoleMass, 'black-hole');
+
+    sim.spawnPlanet(0, 0, blackHoleMass, 'black-hole');
+    sim.spawnPlanet(radius * 0.1, 0, planetMass, 'planet');
+    sim.handleCollisions();
+
+    this.assert(sim.bodies[0].bodyType === 'black-hole', `expected black-hole, got ${sim.bodies[0].bodyType}`);
+    this.assert(sim.supernovaEffects.length === 0, 'black-hole consumption should not create a supernova');
+    this.assert(sim.accretionBurstEffects.length === 1, 'black-hole consumption should always create an accretion burst');
+});
+
+tests.test('neutron-star mergers create a kilonova instead of a supernova', function() {
+    const sim = new SimulationCore();
+    const neutronStarMass = 12;
+    const radius = sim.getRadiusFromMass(neutronStarMass, 'neutron-star');
+
+    sim.spawnPlanet(0, 0, neutronStarMass, 'neutron-star');
+    sim.spawnPlanet(radius * 1.9, 0, neutronStarMass, 'neutron-star');
+    sim.handleCollisions();
+
+    this.assert(sim.bodies[0].bodyType === 'neutron-star', `expected neutron-star, got ${sim.bodies[0].bodyType}`);
+    this.assert(sim.supernovaEffects.length === 0, 'neutron-star mergers should not create a supernova');
+    this.assert(sim.kilonovaEffects.length === 1, 'neutron-star mergers should create a kilonova');
+    this.assert(sim.bodies[0].supernovaProfile === 'kilonova', 'merged neutron star should track the kilonova profile');
+});
+
 tests.test('supernova effect transitions into phase 4 and completes cleanly', function() {
     const effect = new SupernovaEffect(0, 0, null, 7.5);
 
@@ -279,6 +325,29 @@ tests.test('accretion burst effect completes cleanly', function() {
     this.assert(effect.getProperties().brightness > 0, 'accretion burst should still be visible mid-effect');
     effect.time = 1.5;
     this.assert(effect.isDone(), 'accretion burst should complete at its duration');
+});
+
+tests.test('accretion burst size scales with consumed mass', function() {
+    const smallEffect = new AccretionBurstEffect(0, 0, null, 1.5, 1);
+    const largeEffect = new AccretionBurstEffect(0, 0, null, 1.5, 36);
+
+    smallEffect.time = 0.5;
+    largeEffect.time = 0.5;
+
+    const smallProps = smallEffect.getProperties();
+    const largeProps = largeEffect.getProperties();
+
+    this.assert(largeProps.radius > smallProps.radius, 'larger consumed mass should create a larger burst radius');
+    this.assert(largeProps.ringWidth > smallProps.ringWidth, 'larger consumed mass should create a wider burst ring');
+});
+
+tests.test('kilonova effect completes cleanly', function() {
+    const effect = new KilonovaEffect(0, 0, null, 2.5);
+
+    effect.time = 1.0;
+    this.assert(effect.getProperties().brightness > 0, 'kilonova should still be visible mid-effect');
+    effect.time = 2.5;
+    this.assert(effect.isDone(), 'kilonova should complete at its duration');
 });
 
 tests.test('dark matter origin case keeps acceleration finite', function() {
@@ -323,6 +392,7 @@ tests.test('clearAll resets bodies and transient effects', function() {
     sim.spawnPlanet(0, 0, 1);
     sim.createExplosion(0, 0, 50, 1);
     sim.supernovaEffects.push(new SupernovaEffect(0, 0, null, 1));
+    sim.kilonovaEffects.push(new KilonovaEffect(0, 0, null, 1));
     sim.mergeEffects.push({ placeholder: true });
 
     sim.clearAll();
@@ -331,6 +401,7 @@ tests.test('clearAll resets bodies and transient effects', function() {
     this.assert(sim.particlePool.getActive().length === 0, 'particles should be cleared');
     this.assert(sim.supernovaEffects.length === 0, 'supernova effects should be cleared');
     this.assert(sim.accretionBurstEffects.length === 0, 'accretion bursts should be cleared');
+    this.assert(sim.kilonovaEffects.length === 0, 'kilonova effects should be cleared');
     this.assert(sim.mergeEffects.length === 0, 'merge effects should be cleared');
 });
 

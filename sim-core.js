@@ -383,6 +383,9 @@
             this.pulseTime = 0;
             this.supernovaTime = 0;
             this.isAnchored = false;
+            this.maxTrailPoints = 24;
+            this.trailMinSegmentLength = Math.max(2, radius * 0.4);
+            this.trailPoints = [{ x, y }];
         }
 
         setState(nextState) {
@@ -397,6 +400,29 @@
 
             this.ax += fx / this.mass;
             this.ay += fy / this.mass;
+        }
+
+        recordTrailPoint(force = false) {
+            const lastPoint = this.trailPoints[this.trailPoints.length - 1];
+
+            if (!lastPoint) {
+                this.trailPoints.push({ x: this.x, y: this.y });
+                return;
+            }
+
+            const dx = this.x - lastPoint.x;
+            const dy = this.y - lastPoint.y;
+            const distance = Math.sqrt(dx * dx + dy * dy);
+
+            if (!force && distance < this.trailMinSegmentLength) {
+                return;
+            }
+
+            this.trailPoints.push({ x: this.x, y: this.y });
+
+            while (this.trailPoints.length > this.maxTrailPoints) {
+                this.trailPoints.shift();
+            }
         }
 
         update(dt) {
@@ -418,6 +444,7 @@
             this.ay = 0;
             this.rotationAngle += this.rotationSpeed;
             this.pulseTime += dt;
+            this.recordTrailPoint();
         }
     }
 
@@ -595,7 +622,7 @@
     }
 
     class AccretionBurstEffect {
-        constructor(x, y, body = null, duration = 1.5) {
+        constructor(x, y, body = null, duration = 1.5, consumedMass = 12) {
             this.x = x;
             this.y = y;
             this.body = body;
@@ -605,6 +632,7 @@
             this.lockedX = x;
             this.lockedY = y;
             this.positionLocked = false;
+            this.consumedMass = consumedMass;
         }
 
         update(dt) {
@@ -626,10 +654,65 @@
         getProperties() {
             const phase = Math.min(1, this.time / this.duration);
             const brightness = Math.max(0, 1 - phase);
+            const massScale = Math.max(0.6, Math.min(2.4, Math.sqrt(Math.max(this.consumedMass, 0.1) / 12)));
             return {
-                radius: 80 + phase * 220,
+                radius: (80 + phase * 220) * massScale,
+                brightness: Math.min(1.4, brightness * (0.75 + massScale * 0.25)),
+                ringWidth: (12 + phase * 10) * Math.max(0.75, massScale * 0.9),
+            };
+        }
+
+        isDone() {
+            return this.time >= this.duration;
+        }
+    }
+
+    class KilonovaEffect {
+        constructor(x, y, body = null, duration = 2.5) {
+            this.x = x;
+            this.y = y;
+            this.body = body;
+            this.time = 0;
+            this.duration = duration;
+            this.trackDuration = duration * 0.35;
+            this.lockedX = x;
+            this.lockedY = y;
+            this.positionLocked = false;
+            this.axisAngle = Math.random() * Math.PI;
+        }
+
+        update(dt) {
+            this.time += dt;
+
+            if (this.body && this.time < this.trackDuration) {
+                this.x = this.body.x;
+                this.y = this.body.y;
+                return;
+            }
+
+            if (!this.positionLocked) {
+                this.positionLocked = true;
+                this.lockedX = this.x;
+                this.lockedY = this.y;
+            }
+        }
+
+        getProperties() {
+            const phase = Math.min(1, this.time / this.duration);
+            const pulse = Math.sin(phase * Math.PI);
+            const brightness = Math.max(0, 0.92 - phase * 0.45 + pulse * 0.18);
+            const shellRadius = 24 + phase * 150;
+            const shellFade = Math.max(0, 1 - phase * 0.9);
+            return {
+                phase,
+                radius: 55 + phase * 320,
                 brightness,
-                ringWidth: 12 + phase * 10,
+                shellFade,
+                shellRadius,
+                secondaryShellRadius: shellRadius * (1.24 + pulse * 0.18),
+                tertiaryShellRadius: shellRadius * (1.58 + pulse * 0.24),
+                innerShellRadius: Math.max(10, shellRadius * (0.52 + pulse * 0.08)),
+                shimmer: 0.35 + pulse * 0.45,
             };
         }
 
@@ -707,6 +790,7 @@
             this.particlePool = new ParticlePool(1000);
             this.supernovaEffects = [];
             this.accretionBurstEffects = [];
+            this.kilonovaEffects = [];
             this.mergeEffects = [];
             this.running = true;
             this.gravityConstant = 2;
@@ -924,6 +1008,15 @@
                 }
             }
 
+            for (let i = this.kilonovaEffects.length - 1; i >= 0; i--) {
+                const effect = this.kilonovaEffects[i];
+                effect.update(dt);
+
+                if (effect.isDone()) {
+                    this.kilonovaEffects.splice(i, 1);
+                }
+            }
+
             for (let i = this.mergeEffects.length - 1; i >= 0; i--) {
                 const effect = this.mergeEffects[i];
                 effect.update(dt);
@@ -1012,12 +1105,20 @@
                     }
 
                     const mergedStates = [b1.bodyType, b2.bodyType];
+                    const b1IsBlackHole = b1.bodyType === 'black-hole';
+                    const b2IsBlackHole = b2.bodyType === 'black-hole';
                     const involvesBlackHole = mergedStates.includes('black-hole');
                     const involvesStar = mergedStates.includes('star');
+                    const isBlackHoleConsumption = b1IsBlackHole !== b2IsBlackHole;
+                    const isNeutronStarMerger = b1.bodyType === 'neutron-star' && b2.bodyType === 'neutron-star';
 
-                    if (involvesBlackHole && involvesStar) {
+                    if (isNeutronStarMerger) {
+                        mergedBody.supernovaProfile = 'kilonova';
+                        this.createKilonova(newX, newY, mergedBody);
+                    } else if (isBlackHoleConsumption) {
+                        const consumedBody = b1IsBlackHole ? b2 : b1;
                         mergedBody.supernovaProfile = 'accretion-burst';
-                        this.createAccretionBurst(newX, newY, mergedBody);
+                        this.createAccretionBurst(newX, newY, mergedBody, consumedBody.mass);
                     } else if ((newBodyType === 'neutron-star' || newBodyType === 'black-hole') && involvesStar) {
                         mergedBody.supernovaProfile = getSupernovaProfileForState(newBodyType);
                         this.createSupernovaWithBody(newX, newY, newRadius, mergedBody);
@@ -1062,9 +1163,14 @@
             this.createSupernovaWithBody(x, y, radius, null);
         }
 
-        createAccretionBurst(x, y, body = null) {
-            this.accretionBurstEffects.push(new AccretionBurstEffect(x, y, body, 1.5));
-            this.createExplosion(x, y, 12, 1.2);
+        createAccretionBurst(x, y, body = null, consumedMass = 12) {
+            this.accretionBurstEffects.push(new AccretionBurstEffect(x, y, body, 1.5, consumedMass));
+            this.createExplosion(x, y, Math.max(12, consumedMass), Math.min(2.0, 0.9 + consumedMass * 0.04));
+        }
+
+        createKilonova(x, y, body = null) {
+            this.kilonovaEffects.push(new KilonovaEffect(x, y, body, 2.5));
+            this.createExplosion(x, y, 20, 1.5);
         }
 
         clearAll() {
@@ -1072,6 +1178,7 @@
             this.particlePool.clear();
             this.supernovaEffects = [];
             this.accretionBurstEffects = [];
+            this.kilonovaEffects = [];
             this.mergeEffects = [];
         }
 
@@ -1086,6 +1193,7 @@
         ParticlePool,
         SupernovaEffect,
         AccretionBurstEffect,
+        KilonovaEffect,
         MergeEffect,
         SimulationCore,
         MASS_UNIT_LABEL,

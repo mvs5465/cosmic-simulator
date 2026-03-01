@@ -60,6 +60,7 @@ tests.test('runtime exports are available', function() {
     this.assert(typeof Simulator === 'function', 'Simulator should be defined');
     this.assert(typeof Body === 'function', 'Body should be defined');
     this.assert(typeof AccretionBurstEffect === 'function', 'AccretionBurstEffect should be defined');
+    this.assert(typeof KilonovaEffect === 'function', 'KilonovaEffect should be defined');
     this.assert(typeof SupernovaEffect === 'function', 'SupernovaEffect should be defined');
     this.assert(typeof seedScenario === 'function', 'seedScenario should be defined');
     this.assert(typeof bootstrapSimulatorApp === 'function', 'bootstrapSimulatorApp should be defined');
@@ -132,6 +133,44 @@ tests.test('star merging into a black hole creates an accretion burst instead of
     this.assert(sim.accretionBurstEffects.length === 1, 'black-hole consumption should create an accretion burst');
 });
 
+tests.test('black holes create accretion bursts when consuming non-stellar bodies too', function() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 800;
+    canvas.height = 600;
+
+    const sim = new Simulator(canvas);
+    const blackHoleMass = 20;
+    const radius = sim.getRadiusFromMass(blackHoleMass, 'black-hole');
+    sim.spawnPlanet(0, 0, blackHoleMass, 'black-hole');
+    sim.spawnPlanet(radius * 0.1, 0, 1, 'planet');
+
+    sim.handleCollisions();
+
+    this.assert(sim.bodies.length === 1, 'collision should produce one merged body');
+    this.assert(sim.bodies[0].bodyType === 'black-hole', `expected black-hole, got ${sim.bodies[0].bodyType}`);
+    this.assert(sim.supernovaEffects.length === 0, 'black-hole consumption should not create a supernova');
+    this.assert(sim.accretionBurstEffects.length === 1, 'black-hole consumption should always create an accretion burst');
+});
+
+tests.test('neutron-star mergers create a kilonova instead of a supernova', function() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 800;
+    canvas.height = 600;
+
+    const sim = new Simulator(canvas);
+    const neutronStarMass = 12;
+    const radius = sim.getRadiusFromMass(neutronStarMass, 'neutron-star');
+    sim.spawnPlanet(0, 0, neutronStarMass, 'neutron-star');
+    sim.spawnPlanet(radius * 1.9, 0, neutronStarMass, 'neutron-star');
+
+    sim.handleCollisions();
+
+    this.assert(sim.bodies.length === 1, 'collision should produce one merged body');
+    this.assert(sim.bodies[0].bodyType === 'neutron-star', `expected neutron-star, got ${sim.bodies[0].bodyType}`);
+    this.assert(sim.supernovaEffects.length === 0, 'neutron-star mergers should not create a supernova');
+    this.assert(sim.kilonovaEffects.length === 1, 'neutron-star mergers should create a kilonova');
+});
+
 tests.test('draw runs without throwing for a minimal scene', function() {
     const canvas = document.createElement('canvas');
     canvas.width = 800;
@@ -143,6 +182,35 @@ tests.test('draw runs without throwing for a minimal scene', function() {
     sim.draw();
 
     this.assert(true, 'draw completed');
+});
+
+tests.test('drawTrails renders line segments for bodies with motion history', function() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 800;
+    canvas.height = 600;
+
+    const sim = new Simulator(canvas);
+    const body = sim.spawnPlanet(0, 0, 1);
+    body.trailPoints = [
+        { x: 0, y: 0 },
+        { x: 10, y: 0 },
+        { x: 20, y: 5 },
+    ];
+
+    let lineSegments = 0;
+    sim.ctx = {
+        beginPath() {},
+        moveTo() {},
+        lineTo() { lineSegments++; },
+        stroke() {},
+        set strokeStyle(_value) {},
+        set lineWidth(_value) {},
+        set lineCap(_value) {},
+    };
+
+    sim.drawTrails();
+
+    this.assert(lineSegments === 2, `expected two trail line segments, got ${lineSegments}`);
 });
 
 tests.test('sandbox scenario seeding creates the expected starting bodies', function() {
@@ -208,14 +276,27 @@ tests.test('solar-system scenario seeds a central star and orbiting planets', fu
     seedScenario(sim, 'solar-system');
 
     this.assert(sim.darkMatterStrength === 0, `expected no dark matter, got ${sim.darkMatterStrength}`);
-    this.assert(sim.bodies.length >= 2 && sim.bodies.length <= 6,
-        `expected 2-6 total bodies, got ${sim.bodies.length}`);
+    this.assert(sim.bodies.length >= 4 && sim.bodies.length <= 10,
+        `expected 4-10 total bodies, got ${sim.bodies.length}`);
 
     const star = sim.bodies[0];
+    const maxInitialOrbit = (sim.canvas.width / (2 * sim.zoom)) * 0.75;
+    let orbitalSign = null;
+    let totalMomentumX = 0;
+    let totalMomentumY = 0;
+    const orbitBodies = [];
     this.assert(star.bodyType === 'star', `expected central star, got ${star.bodyType}`);
     this.assert(star.isAnchored === false, 'central star should not be anchored');
     this.assert(star.x === 0 && star.y === 0, `expected star at origin, got (${star.x}, ${star.y})`);
-    this.assert(star.vx === 0 && star.vy === 0, `expected stationary star, got (${star.vx}, ${star.vy})`);
+    this.assert(Number.isFinite(star.vx) && Number.isFinite(star.vy), 'expected a valid barycentric star velocity');
+
+    for (const body of sim.bodies) {
+        totalMomentumX += body.vx * body.mass;
+        totalMomentumY += body.vy * body.mass;
+    }
+
+    this.assert(Math.abs(totalMomentumX) < 0.001, `expected near-zero total momentum x, got ${totalMomentumX}`);
+    this.assert(Math.abs(totalMomentumY) < 0.001, `expected near-zero total momentum y, got ${totalMomentumY}`);
 
     for (let i = 1; i < sim.bodies.length; i++) {
         const body = sim.bodies[i];
@@ -224,21 +305,93 @@ tests.test('solar-system scenario seeds a central star and orbiting planets', fu
             `expected orbital body type asteroid/planet/gas-giant, got ${body.bodyType}`
         );
 
-        const distance = Math.hypot(body.x, body.y);
-        const radialDotVelocity = body.x * body.vx + body.y * body.vy;
+        const relativeX = body.x - star.x;
+        const relativeY = body.y - star.y;
+        const relativeVx = body.vx - star.vx;
+        const relativeVy = body.vy - star.vy;
+        const distance = Math.hypot(relativeX, relativeY);
+        const radialDotVelocity = relativeX * relativeVx + relativeY * relativeVy;
+        const angularMomentumSign = Math.sign((relativeX * relativeVy) - (relativeY * relativeVx));
         const expectedSpeed = getCircularOrbitSpeedForTest(
             star.mass,
             distance,
             sim.gravityConstant,
             sim.massRealizationScale
         );
-        const actualSpeed = Math.hypot(body.vx, body.vy);
+        const actualSpeed = Math.hypot(relativeVx, relativeVy);
 
         this.assert(distance > star.radius, `expected planet outside star radius, got distance ${distance}`);
+        this.assert(distance <= maxInitialOrbit + 0.001,
+            `expected planet within the initial viewport radius ${maxInitialOrbit}, got ${distance}`);
         this.assert(Math.abs(radialDotVelocity) < 0.001, `expected tangential velocity, got dot ${radialDotVelocity}`);
+        this.assert(angularMomentumSign !== 0, 'expected a non-zero orbital direction');
+        if (orbitalSign === null) {
+            orbitalSign = angularMomentumSign;
+        } else {
+            this.assert(angularMomentumSign === orbitalSign, 'expected all orbiters to share one orbital direction');
+        }
         this.assert(Math.abs(actualSpeed - expectedSpeed) < 0.001,
             `expected orbital speed ${expectedSpeed}, got ${actualSpeed}`);
+        orbitBodies.push({ distance, radius: body.radius });
     }
+
+    for (let i = 1; i < orbitBodies.length; i++) {
+        const previousOrbit = orbitBodies[i - 1];
+        const nextOrbit = orbitBodies[i];
+        const previousDistance = previousOrbit.distance;
+        const nextDistance = nextOrbit.distance;
+        const orbitalRatio = nextDistance / previousDistance;
+        const periodRatio = Math.pow(orbitalRatio, 1.5);
+        const radialGap = nextDistance - previousDistance;
+        const minimumExpectedGap = Math.max(14, previousOrbit.radius + nextOrbit.radius + 8);
+
+        this.assert(nextDistance > previousDistance, 'expected orbital distances to increase outward');
+        this.assert(orbitalRatio > 1.02, `expected separated orbital radii, got ratio ${orbitalRatio}`);
+        this.assert(radialGap >= minimumExpectedGap,
+            `expected orbital gap >= ${minimumExpectedGap}, got ${radialGap}`);
+        this.assert(periodRatio < 6.1, `expected a bounded resonance-biased period ratio below 6.1, got ${periodRatio}`);
+    }
+});
+
+tests.test('globular-cluster scenario seeds a bounded swarm of stars', function() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 800;
+    canvas.height = 600;
+
+    const sim = new Simulator(canvas);
+    seedScenario(sim, 'globular-cluster');
+
+    const minimumZoom = 1 / 3;
+    const maxZoomOutHalfWidth = sim.canvas.width / (2 * minimumZoom);
+    const maxZoomOutHalfHeight = sim.canvas.height / (2 * minimumZoom);
+    const clusterRadiusLimit = Math.min(maxZoomOutHalfWidth, maxZoomOutHalfHeight) * 0.8;
+    let totalMomentumX = 0;
+    let totalMomentumY = 0;
+    let movingStars = 0;
+
+    this.assert(sim.darkMatterStrength === 0.25, `expected cluster dark matter 0.25, got ${sim.darkMatterStrength}`);
+    this.assert(sim.bodies.length >= 20 && sim.bodies.length <= 40,
+        `expected 20-40 stars, got ${sim.bodies.length}`);
+
+    for (const body of sim.bodies) {
+        const distance = Math.hypot(body.x, body.y);
+        const speed = Math.hypot(body.vx, body.vy);
+
+        this.assert(body.bodyType === 'star', `expected star body type, got ${body.bodyType}`);
+        this.assert(distance <= clusterRadiusLimit + 0.001,
+            `expected star within max zoom-out radius ${clusterRadiusLimit}, got ${distance}`);
+
+        totalMomentumX += body.vx * body.mass;
+        totalMomentumY += body.vy * body.mass;
+
+        if (speed > 0.001) {
+            movingStars++;
+        }
+    }
+
+    this.assert(movingStars === sim.bodies.length, 'expected every cluster star to start with motion');
+    this.assert(Math.abs(totalMomentumX) < 0.001, `expected near-zero total momentum x, got ${totalMomentumX}`);
+    this.assert(Math.abs(totalMomentumY) < 0.001, `expected near-zero total momentum y, got ${totalMomentumY}`);
 });
 
 tests.test('black-hole merge keeps flare detail visible on the merged body during the active merge', function() {
