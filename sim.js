@@ -886,6 +886,9 @@ class Simulator {
         // Draw starfield background
         this.drawStarfield();
 
+        // Draw dark matter effect (subtle, vague distortion)
+        this.drawDarkMatterEffect();
+
         // Draw grid (optional)
         this.drawGrid();
 
@@ -1237,6 +1240,52 @@ class Simulator {
         this.ctx.fill();
 
         this.ctx.restore();
+    }
+
+    drawDarkMatterEffect() {
+        // Draw subtle, vague dark matter distortion effect centered at origin
+        // Creates rippling waves and gravitational lensing appearance
+        const centerScreenX = (0 - this.cameraX) * this.zoom;
+        const centerScreenY = (0 - this.cameraY) * this.zoom;
+
+        // Only draw if center is on screen
+        if (centerScreenX < -500 || centerScreenX > this.canvas.width + 500 ||
+            centerScreenY < -500 || centerScreenY > this.canvas.height + 500) {
+            return;
+        }
+
+        // Draw concentric rings of dark matter influence (very subtle)
+        this.ctx.globalAlpha = 0.04; // Very faint
+
+        // Multiple ring layers for depth
+        for (let i = 1; i <= 5; i++) {
+            const ringRadius = i * 150 * this.zoom;
+
+            // Subtle wave effect
+            const waveAmount = Math.sin(Date.now() * 0.0005 + i) * 20;
+
+            this.ctx.strokeStyle = 'rgba(100, 150, 255, 0.3)';
+            this.ctx.lineWidth = 1;
+            this.ctx.beginPath();
+            this.ctx.arc(centerScreenX, centerScreenY, ringRadius + waveAmount, 0, Math.PI * 2);
+            this.ctx.stroke();
+        }
+
+        // Add subtle particle dust field around center
+        this.ctx.fillStyle = 'rgba(80, 120, 255, 0.15)';
+        for (let i = 0; i < 30; i++) {
+            const angle = (i / 30) * Math.PI * 2 + Date.now() * 0.0001 * i;
+            const distance = 100 + Math.sin(Date.now() * 0.0003 + i) * 80;
+            const x = centerScreenX + Math.cos(angle) * distance * this.zoom;
+            const y = centerScreenY + Math.sin(angle) * distance * this.zoom;
+            const size = 1 + Math.sin(Date.now() * 0.0005 + i) * 0.5;
+
+            this.ctx.beginPath();
+            this.ctx.arc(x, y, size, 0, Math.PI * 2);
+            this.ctx.fill();
+        }
+
+        this.ctx.globalAlpha = 1;
     }
 
     drawStarfield() {
