@@ -1,59 +1,61 @@
-// ==================== PHYSICS ENGINE ====================
+const coreExports = globalThis.CosmicSimulatorCore;
 
-class Body {
+if (!coreExports) {
+    throw new Error('sim-core.js must be loaded before sim.js');
+}
+
+const {
+    Body,
+    SupernovaEffect,
+    SimulationCore,
+} = coreExports;
+
+class BrowserBody extends Body {
     constructor(x, y, vx, vy, mass, radius, color, bodyType = 'planet') {
-        this.x = x;
-        this.y = y;
-        this.vx = vx;
-        this.vy = vy;
-        this.mass = mass;
-        this.radius = radius;
-        this.color = color;
-        this.ax = 0;
-        this.ay = 0;
-        this.bodyType = bodyType; // 'asteroid', 'planet', 'gas-giant', 'star', 'black-hole'
+        super(x, y, vx, vy, mass, radius, color, bodyType);
         this.texture = null;
-        this.rotationAngle = Math.random() * Math.PI * 2;
-        this.rotationSpeed = (Math.random() - 0.5) * 0.15;
-        this.pulseTime = 0; // For neutron star pulsation
-        this.pulseFrequency = (0.2 + Math.random() * 0.8) / 2.5; // 0.08-0.32x base frequency (5x slower / 2)
-        this.pulseBrightnessMin = 0.1 + Math.random() * 0.2; // 0.1-0.3 minimum brightness
-        this.pulseBrightnessMax = 0.8 + Math.random() * 0.4; // 0.8-1.2 maximum brightness
-        this.pulseRadiusMin = 1.8 + Math.random() * 0.4; // 1.8-2.2x minimum radius
-        this.pulseRadiusMax = 3.2 + Math.random() * 0.8; // 3.2-4.0x maximum radius
-        this.supernovaTime = 0; // For tracking supernova effect duration
-        this.ringScale = 1.0; // For gas giant ring size variation
-        this.ringCount = 3; // Number of rings for this gas giant
-        this.ringOpacities = [0.85, 0.85, 0.85]; // Per-ring opacity variation
-        this.ringVisible = [true, true, true]; // Per-ring visibility
-        this.ringHueShift = 0; // For gas giant ring color variation
-        this.ringLightness = 50; // For gas giant ring brightness variation
-        this.asteroidVertices = null; // For asteroid shapes
-        this.blackHoleFlares = null; // Cached flare positions for black holes (for performance)
+        this.pulseFrequency = (0.2 + Math.random() * 0.8) / 2.5;
+        this.pulseBrightnessMin = 0.1 + Math.random() * 0.2;
+        this.pulseBrightnessMax = 0.8 + Math.random() * 0.4;
+        this.pulseRadiusMin = 1.8 + Math.random() * 0.4;
+        this.pulseRadiusMax = 3.2 + Math.random() * 0.8;
+        this.ringScale = 1.0;
+        this.ringCount = 3;
+        this.ringOpacities = [0.85, 0.85, 0.85];
+        this.ringVisible = [true, true, true];
+        this.ringHueShift = 0;
+        this.ringLightness = 50;
+        this.asteroidVertices = null;
+        this.blackHoleFlares = null;
+        this.craters = null;
 
         if (bodyType === 'planet') {
             this.texture = this.generateEarthTexture(radius);
         } else if (bodyType === 'gas-giant') {
             this.texture = this.generateGasGiantTexture(radius);
-            // Randomize all ring properties for every gas giant (biased towards fainter)
-            this.ringScale = 0.5 + Math.random() * 1.0; // 0.5 to 1.5
-            // Random number of rings: 1-5
+            this.ringScale = 0.5 + Math.random() * 1.0;
             this.ringCount = Math.floor(Math.random() * 5) + 1;
-            // Randomize opacity per ring independently
             this.ringOpacities = [];
             this.ringVisible = [];
+            this.ringSaturations = [];
             for (let i = 0; i < this.ringCount; i++) {
                 this.ringOpacities.push(0.1 + Math.random() * Math.random() * 0.25);
-                this.ringVisible.push(Math.random() < 0.5); // 50% chance each ring is visible
+                this.ringVisible.push(Math.random() < 0.5);
+                this.ringSaturations.push(60 + Math.random() * 30);
             }
-            this.ringHueShift = Math.random() * 40 - 20; // -20 to +20 hue shift
-            this.ringLightness = 35 + Math.random() * 20; // 35 to 55 lightness
+            this.ringHueShift = Math.random() * 40 - 20;
+            this.ringLightness = 35 + Math.random() * 20;
         } else if (bodyType === 'star') {
             this.texture = this.generateStarTexture(radius, mass);
         } else if (bodyType === 'asteroid') {
             this.texture = this.generateAsteroidTexture(radius);
-            // Generate irregular asteroid shape
             this.asteroidVertices = this.generateAsteroidShape(radius);
+            this.craters = Array.from({ length: 2 }, () => {
+                const angle = Math.random() * Math.PI * 2;
+                const distance = 0.4 + Math.random() * 0.3;
+                const size = 0.1 + Math.random() * 0.1;
+                return { angle, distance, size };
+            });
         } else if (bodyType === 'neutron-star') {
             this.texture = this.generateNeutronStarTexture(radius);
         } else if (bodyType === 'black-hole') {
@@ -63,14 +65,13 @@ class Body {
     }
 
     generateBlackHoleFlares(radius) {
-        // Generate flare positions once per black hole, cache them for consistent rendering
         const flareCount = Math.max(4, Math.ceil(radius / 10));
         const flares = [];
         for (let i = 0; i < flareCount; i++) {
             flares.push({
                 angle: Math.random() * Math.PI * 2,
-                distance: 0.25 + Math.random() * 0.25, // Normalized to radius
-                sizeBase: 0.02 + Math.random() * 0.04 // Normalized to radius
+                distance: 0.25 + Math.random() * 0.25,
+                sizeBase: 0.02 + Math.random() * 0.04,
             });
         }
         return flares;
@@ -83,29 +84,24 @@ class Body {
         canvas.height = size;
         const ctx = canvas.getContext('2d');
 
-        // Water base
         ctx.fillStyle = '#1a5490';
         ctx.fillRect(0, 0, size, size);
 
-        // Generate random continents with Perlin-like noise (simplified)
         for (let i = 0; i < 5; i++) {
             const continentX = Math.random() * size;
             const continentY = Math.random() * size;
             const continentSize = Math.random() * (size * 0.4) + size * 0.15;
-
-            ctx.fillStyle = `hsl(${Math.random() * 40 + 100}, 60%, 35%)`; // Green tones
+            ctx.fillStyle = `hsl(${Math.random() * 40 + 100}, 60%, 35%)`;
             ctx.beginPath();
             ctx.ellipse(continentX, continentY, continentSize, continentSize * 0.7, Math.random() * Math.PI, 0, Math.PI * 2);
             ctx.fill();
         }
 
-        // Add some cloud wisps
         ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
         for (let i = 0; i < 3; i++) {
             const cloudX = Math.random() * size;
             const cloudY = Math.random() * size;
             const cloudWidth = Math.random() * size * 0.3 + size * 0.1;
-
             ctx.beginPath();
             ctx.ellipse(cloudX, cloudY, cloudWidth, cloudWidth * 0.3, Math.random() * Math.PI, 0, Math.PI * 2);
             ctx.fill();
@@ -121,19 +117,15 @@ class Body {
         canvas.height = size;
         const ctx = canvas.getContext('2d');
 
-        // Base color (orange, purple, or blue tones)
-        const hue = Math.random() * 60 + 20; // Orange to purple range
+        const hue = Math.random() * 60 + 20;
         ctx.fillStyle = `hsl(${hue}, 80%, 45%)`;
         ctx.fillRect(0, 0, size, size);
 
-        // Band patterns
         for (let i = 0; i < 5; i++) {
             const bandY = (i / 5) * size;
             const bandHeight = size / 6;
             ctx.fillStyle = `hsl(${hue + (i % 2) * 20}, 70%, ${40 + (i % 3) * 5}%)`;
             ctx.fillRect(0, bandY, size, bandHeight);
-
-            // Wavy distortion on bands
             ctx.fillStyle = `hsl(${hue + 10}, 60%, 35%)`;
             for (let x = 0; x < size; x += 20) {
                 const waveY = bandY + Math.sin(x * 0.05 + i) * 5;
@@ -150,35 +142,28 @@ class Body {
         canvas.width = size;
         canvas.height = size;
         const ctx = canvas.getContext('2d');
-
-        // Color based on mass: red (just above gas giant) to blue (just below black hole)
-        // Range: 60 (gas giant threshold) to 1500 (black hole threshold)
         const massRange = 1500 - 60;
-        const massFraction = Math.max(0, Math.min((mass - 60) / massRange, 1)); // 0 to 1
-
-        // Smooth color sequence: red → orange → yellow → white → blue
-        let red, green, blue;
+        const massFraction = Math.max(0, Math.min((mass - 60) / massRange, 1));
+        let red;
+        let green;
+        let blue;
 
         if (massFraction < 0.25) {
-            // Red to orange (0 to 0.25)
             const t = massFraction / 0.25;
             red = 255;
             green = Math.round(100 * t);
             blue = 0;
         } else if (massFraction < 0.5) {
-            // Orange to yellow (0.25 to 0.5)
             const t = (massFraction - 0.25) / 0.25;
             red = 255;
             green = Math.round(100 + 155 * t);
             blue = 0;
         } else if (massFraction < 0.75) {
-            // Yellow to white (0.5 to 0.75)
             const t = (massFraction - 0.5) / 0.25;
             red = 255;
             green = 255;
-            blue = Math.round(0 + 255 * t);
+            blue = Math.round(255 * t);
         } else {
-            // White to blue (0.75 to 1)
             const t = (massFraction - 0.75) / 0.25;
             red = Math.round(255 * (1 - t * 0.8));
             green = Math.round(255 * (1 - t * 0.6));
@@ -187,17 +172,13 @@ class Body {
 
         const centerColor = `rgb(${red}, ${green}, ${blue})`;
         const outerColor = `rgb(${Math.round(red * 0.6)}, ${Math.round(green * 0.6)}, ${Math.round(blue * 0.6)})`;
-
-        // Radial gradient with mass-dependent color
         const gradient = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
         gradient.addColorStop(0, '#ffffff');
         gradient.addColorStop(0.5, centerColor);
         gradient.addColorStop(1, outerColor);
-
         ctx.fillStyle = gradient;
         ctx.fillRect(0, 0, size, size);
 
-        // Add some flare/bright spots
         ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
         for (let i = 0; i < 3; i++) {
             const x = Math.random() * size;
@@ -217,12 +198,8 @@ class Body {
         canvas.width = size;
         canvas.height = size;
         const ctx = canvas.getContext('2d');
-
-        // Gray base
         ctx.fillStyle = '#999999';
         ctx.fillRect(0, 0, size, size);
-
-        // Add craters (deterministic based on position)
         ctx.fillStyle = '#666666';
         for (let i = 0; i < 2; i++) {
             const craterX = (size * 0.3) + (i * size * 0.4);
@@ -232,24 +209,20 @@ class Body {
             ctx.arc(craterX, craterY, craterSize, 0, Math.PI * 2);
             ctx.fill();
         }
-
         return canvas;
     }
 
     generateAsteroidShape(radius = this.radius) {
-        // Generate an irregular polygon for asteroid shape
-        const numVertices = Math.floor(Math.random() * 4) + 6; // 6-9 vertices
+        const numVertices = Math.floor(Math.random() * 4) + 6;
         const vertices = [];
-
         for (let i = 0; i < numVertices; i++) {
             const angle = (i / numVertices) * Math.PI * 2;
-            // Randomize radius at each vertex for irregular shape
-            const randomRadius = radius * (0.7 + Math.random() * 0.6); // 0.7 to 1.3x radius
-            const x = Math.cos(angle) * randomRadius;
-            const y = Math.sin(angle) * randomRadius;
-            vertices.push({ x, y });
+            const randomRadius = radius * (0.7 + Math.random() * 0.6);
+            vertices.push({
+                x: Math.cos(angle) * randomRadius,
+                y: Math.sin(angle) * randomRadius,
+            });
         }
-
         return vertices;
     }
 
@@ -259,16 +232,12 @@ class Body {
         canvas.width = size;
         canvas.height = size;
         const ctx = canvas.getContext('2d');
-
-        // Neutron star: ultra-dense compact object with intense magnetic field effect
         const centerX = size / 2;
         const centerY = size / 2;
 
-        // Dark background
         ctx.fillStyle = '#001a33';
         ctx.fillRect(0, 0, size, size);
 
-        // Super bright white-hot core (ultra-compressed matter)
         const coreGradient = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, size * 0.45);
         coreGradient.addColorStop(0, '#ffffff');
         coreGradient.addColorStop(0.15, '#ffeecc');
@@ -277,7 +246,6 @@ class Body {
         ctx.fillStyle = coreGradient;
         ctx.fillRect(0, 0, size, size);
 
-        // Magnetic field lines radiating from surface
         ctx.strokeStyle = 'rgba(100, 220, 255, 0.4)';
         ctx.lineWidth = 1;
         for (let i = 0; i < 8; i++) {
@@ -296,56 +264,40 @@ class Body {
     }
 
     generateBlackHoleTexture(radius = this.radius) {
-        // Cap texture size to prevent lag on large black holes
         const maxSize = 128;
         const uncappedSize = Math.ceil(radius * 4);
         const size = Math.min(maxSize, uncappedSize);
-        if (uncappedSize > maxSize) {
-            console.log(`[TEXTURE] Black hole texture capped: ${uncappedSize} → ${size}`);
-        }
         const canvas = document.createElement('canvas');
         canvas.width = size;
         canvas.height = size;
         const ctx = canvas.getContext('2d');
-
-        // Black hole: dark center, empty space, then fiery accretion donut
         const centerX = size / 2;
         const centerY = size / 2;
+        const innerDiskRadius = size * 0.25;
+        const outerDiskRadius = size * 0.5;
 
-        // Inner radius of disk, outer radius of disk
-        const innerDiskRadius = size * 0.25; // Empty space inside the donut
-        const outerDiskRadius = size * 0.5;  // Outer edge of disk
-
-        // Draw the accretion disk as a ring using a clipping path
         ctx.save();
-
-        // Create a ring-shaped clipping region
         ctx.beginPath();
-        ctx.arc(centerX, centerY, outerDiskRadius, 0, Math.PI * 2); // Outer circle
-        ctx.arc(centerX, centerY, innerDiskRadius, 0, Math.PI * 2, true); // Inner circle (hole)
+        ctx.arc(centerX, centerY, outerDiskRadius, 0, Math.PI * 2);
+        ctx.arc(centerX, centerY, innerDiskRadius, 0, Math.PI * 2, true);
         ctx.clip();
 
-        // Now draw the disk gradient (it will only appear in the ring)
         const diskGradient = ctx.createRadialGradient(centerX, centerY, innerDiskRadius, centerX, centerY, outerDiskRadius);
-        diskGradient.addColorStop(0, 'rgba(255, 200, 100, 0.9)'); // Bright inner edge of disk
+        diskGradient.addColorStop(0, 'rgba(255, 200, 100, 0.9)');
         diskGradient.addColorStop(0.3, 'rgba(255, 150, 80, 0.8)');
         diskGradient.addColorStop(0.6, 'rgba(255, 100, 50, 0.5)');
-        diskGradient.addColorStop(1, 'rgba(200, 50, 0, 0)'); // Fade to transparent at outer edge
-
+        diskGradient.addColorStop(1, 'rgba(200, 50, 0, 0)');
         ctx.fillStyle = diskGradient;
         ctx.beginPath();
         ctx.arc(centerX, centerY, outerDiskRadius, 0, Math.PI * 2);
         ctx.fill();
 
-        // Add turbulent texture with noise/flare patterns on the disk only (reduced from 20 to 8)
-        const flareCount = Math.max(4, Math.ceil(size / 16)); // Scale flare count with texture size, min 4
+        const flareCount = Math.max(4, Math.ceil(size / 16));
         for (let i = 0; i < flareCount; i++) {
             const angle = Math.random() * Math.PI * 2;
-            const distance = size * (0.25 + Math.random() * 0.25); // Only in the disk zone
+            const distance = size * (0.25 + Math.random() * 0.25);
             const x = centerX + Math.cos(angle) * distance;
             const y = centerY + Math.sin(angle) * distance;
-
-            // Bright flares
             const flareSize = size * (0.02 + Math.random() * 0.04);
             const flareGradient = ctx.createRadialGradient(x, y, 0, x, y, flareSize);
             flareGradient.addColorStop(0, 'rgba(255, 255, 200, 0.8)');
@@ -358,13 +310,11 @@ class Body {
 
         ctx.restore();
 
-        // Black inner core (event horizon)
         ctx.fillStyle = '#000000';
         ctx.beginPath();
         ctx.arc(centerX, centerY, size * 0.12, 0, Math.PI * 2);
         ctx.fill();
 
-        // Subtle event horizon border (faint white glow)
         ctx.strokeStyle = 'rgba(200, 200, 200, 0.4)';
         ctx.lineWidth = 1;
         ctx.beginPath();
@@ -373,348 +323,35 @@ class Body {
 
         return canvas;
     }
-
-    applyForce(fx, fy) {
-        this.ax += fx / this.mass;
-        this.ay += fy / this.mass;
-    }
-
-    update(dt) {
-        this.vx += this.ax * dt;
-        this.vy += this.ay * dt;
-        this.x += this.vx * dt;
-        this.y += this.vy * dt;
-        this.ax = 0;
-        this.ay = 0;
-
-        // Rotate all bodies
-        this.rotationAngle += this.rotationSpeed;
-
-        // Update pulsation time for neutron stars
-        this.pulseTime += dt;
-    }
 }
 
-class Particle {
-    constructor(x, y, vx, vy, lifetime) {
-        this.x = x;
-        this.y = y;
-        this.vx = vx;
-        this.vy = vy;
-        this.lifetime = lifetime;
-        this.maxLifetime = lifetime;
-    }
-
-    update(dt) {
-        this.x += this.vx * dt;
-        this.y += this.vy * dt;
-        this.lifetime -= dt;
-    }
-
-    getAlpha() {
-        return Math.max(0, this.lifetime / this.maxLifetime);
-    }
-}
-
-// ==================== PARTICLE POOL ====================
-// Reuse particle objects instead of creating/destroying them
-
-class ParticlePool {
-    constructor(initialSize = 500) {
-        this.available = [];
-        this.active = [];
-
-        // Pre-allocate particles with dummy lifetime
-        for (let i = 0; i < initialSize; i++) {
-            this.available.push(new Particle(0, 0, 0, 0, 1));
-        }
-    }
-
-    acquire(x, y, vx, vy, lifetime) {
-        let particle;
-
-        if (this.available.length > 0) {
-            // Reuse from pool
-            particle = this.available.pop();
-            particle.x = x;
-            particle.y = y;
-            particle.vx = vx;
-            particle.vy = vy;
-            particle.lifetime = lifetime;
-            particle.maxLifetime = lifetime;
-        } else {
-            // Pool exhausted, create new (shouldn't happen with good sizing)
-            particle = new Particle(x, y, vx, vy, lifetime);
-        }
-
-        this.active.push(particle);
-        return particle;
-    }
-
-    update(dt) {
-        // Update all active particles and move dead ones back to pool
-        // Iterate backwards through the array so removals don't affect indices
-        for (let i = this.active.length - 1; i >= 0; i--) {
-            const particle = this.active[i];
-            particle.update(dt);
-
-            if (particle.lifetime <= 0) {
-                // Remove particle and return to pool
-                this.active.splice(i, 1);
-                this.available.push(particle);
-            }
-        }
-    }
-
-    getActive() {
-        return this.active;
-    }
-
-    clear() {
-        this.available.push(...this.active);
-        this.active = [];
-    }
-}
-
-class SupernovaEffect {
-    constructor(x, y, body = null, duration = 15.0) {
-        this.x = x;
-        this.y = y;
-        this.body = body;
-        this.time = 0;
-        this.duration = duration;
-        this.explosionX = x;  // Explosion stays at initial location
-        this.explosionY = y;
-        this.explosionLocked = false;
-
-        // Phase timings
-        this.phase1Duration = 2.0;  // Bright leadup
-        this.phase2Duration = 0.5;  // Silent collapse
-        this.phase3Start = this.phase1Duration + this.phase2Duration;
-        this.phase3Duration = 3.0;  // Giant explosion with peak white (1s blinding white)
-        this.phase4Duration = this.duration - this.phase3Start - this.phase3Duration; // Very slow fade (9s)
-
-        // Mark body as in supernova
-        if (this.body) {
-            this.body.supernovaTime = this.duration;
-        }
-    }
-
-    update(dt) {
-        this.time += dt;
-
-        // Follow the star during phases 1-3, freeze during explosion and fade
-        if (this.body && this.time < this.phase3Start) {
-            this.x = this.body.x;
-            this.y = this.body.y;
-        } else if (!this.explosionLocked) {
-            // Lock explosion position at start of phase 3
-            this.explosionLocked = true;
-            this.explosionX = this.x;
-            this.explosionY = this.y;
-        }
-    }
-
-    getProperties() {
-        const t = this.time;
-
-        if (t < this.phase1Duration) {
-            // Phase 1: Bright leadup (pulsing glow)
-            const phase = t / this.phase1Duration;
-            return {
-                radius: 50 * phase,
-                brightness: 0.8 * phase,
-                color: 'rgba(255, 200, 100, ',
-                particles: 0,
-                showWhiteSphere: true,
-                phase: 1
-            };
-        } else if (t < this.phase1Duration + this.phase2Duration) {
-            // Phase 2: Silent collapse (dark)
-            return {
-                radius: 50 * 0.8,
-                brightness: 0,
-                color: 'rgba(0, 0, 0, ',
-                particles: 0,
-                showWhiteSphere: true,
-                phase: 2
-            };
-        } else if (t < this.phase3Start + this.phase3Duration) {
-            // Phase 3: Giant explosion with blinding white peak
-            const phase = (t - this.phase3Start) / this.phase3Duration;
-
-            // Peak white for middle 1 second (roughly phase 0.33-0.66)
-            let brightness;
-            if (phase < 0.33) {
-                // Ramp up to peak white
-                brightness = 0.5 + (phase / 0.33) * 2.5; // 0.5 → 3.0
-            } else if (phase < 0.66) {
-                // Hold at blinding white
-                brightness = 3.0;
-            } else {
-                // Fade from peak
-                brightness = 3.0 * (1 - (phase - 0.66) / 0.34);
-            }
-
-            return {
-                radius: Math.min(1200, 100 + 1100 * phase),
-                brightness: brightness,
-                color: 'rgba(255, 255, 255, ',
-                particles: Math.floor(150 * (1 - phase)),
-                showWhiteSphere: true,
-                phase: 3
-            };
-        } else {
-            // Phase 4: Very slow fade (9 seconds) - neutron star gradually appears
-            const phase = (t - (this.phase3Start + this.phase3Duration)) / this.phase4Duration;
-            // Fade brightness from 1.0 to 0.0, revealing neutron star underneath
-            const brightness = Math.max(0, 1.0 - phase * 0.8);
-            return {
-                radius: 1200,
-                brightness: brightness,
-                color: 'rgba(255, 150, 100, ',
-                particles: 0,
-                showWhiteSphere: false,
-                phase: 4
-            };
-        }
-    }
-
-    isDone() {
-        return this.time >= this.duration;
-    }
-}
-
-class MergeEffect {
-    constructor(body1, body2, mergedBody, duration = 1.0) {
-        this.body1 = body1;
-        this.body2 = body2;
-        this.mergedBody = mergedBody;
-        this.time = 0;
-        this.duration = duration;
-
-        // Store initial positions for interpolation
-        this.body1StartX = body1.x;
-        this.body1StartY = body1.y;
-        this.body2StartX = body2.x;
-        this.body2StartY = body2.y;
-
-        // Merged body spawn position
-        this.mergeX = mergedBody.x;
-        this.mergeY = mergedBody.y;
-
-        // Mark bodies as merging (skip physics)
-        this.body1.isMerging = true;
-        this.body2.isMerging = true;
-    }
-
-    update(dt) {
-        this.time += dt;
-
-        // Animation phase (0 to 1)
-        const phase = Math.min(1, this.time / this.duration);
-
-        // Move bodies toward merge point (easing: ease-in)
-        const easePhase = phase * phase; // Quadratic ease-in
-        this.body1.x = this.body1StartX + (this.mergeX - this.body1StartX) * easePhase;
-        this.body1.y = this.body1StartY + (this.mergeY - this.body1StartY) * easePhase;
-        this.body2.x = this.body2StartX + (this.mergeX - this.body2StartX) * easePhase;
-        this.body2.y = this.body2StartY + (this.mergeY - this.body2StartY) * easePhase;
-
-        // Scale down bodies as they merge
-        this.body1.mergeScale = 1 - easePhase;
-        this.body2.mergeScale = 1 - easePhase;
-
-        // Fade bodies out
-        this.body1.mergeAlpha = 1 - easePhase;
-        this.body2.mergeAlpha = 1 - easePhase;
-
-        // Scale merged body in from center
-        this.mergedBody.mergeScale = easePhase;
-        this.mergedBody.mergeAlpha = easePhase;
-    }
-
-    isDone() {
-        return this.time >= this.duration;
-    }
-
-    finish() {
-        // Clean up
-        this.body1.isMerging = false;
-        this.body2.isMerging = false;
-        this.mergedBody.mergeScale = 1;
-        this.mergedBody.mergeAlpha = 1;
-    }
-}
-
-class Simulator {
+class Simulator extends SimulationCore {
     constructor(canvas) {
+        super({
+            createBody: (x, y, vx, vy, mass, radius, color, bodyType) => {
+                return new BrowserBody(x, y, vx, vy, mass, radius, color, bodyType);
+            },
+        });
+
         this.canvas = canvas;
         this.ctx = canvas.getContext('2d');
-        this.bodies = [];
-        this.particlePool = new ParticlePool(1000); // Pre-allocate 1000 particles
-        this.supernovaEffects = [];
-        this.mergeEffects = [];
-        this.running = true;
-        this.gravityConstant = 2;
-        this.timeScale = 2; // Speed up by default
         this.lastTime = Date.now();
+        this.lastFpsSampleTime = this.lastTime;
         this.frameCount = 0;
         this.fps = 60;
-        this.cameraX = 0; // Will be set properly after canvas resize
+        this.cameraX = 0;
         this.cameraY = 0;
         this.zoom = 1;
-        this.hoveredBody = null; // Track which body is being hovered
-
-        // Dark matter attractor at origin (invisible)
-        this.darkMatterX = 0;
-        this.darkMatterY = 0;
-        this.darkMatterMass = 50; // Strong, hidden influence
-        this.darkMatterStrength = 1.5; // Multiplier for the attractor force
-
-        // Mass thresholds for body types (global unified system)
-        this.massThresholds = {
-            asteroid: 5,
-            planet: 20,
-            gasGiant: 60,
-            star: 150,
-            neutronStar: 1500,
-            blackHole: 3000,
-        };
+        this.hoveredBody = null;
 
         this.resizeCanvas();
         window.addEventListener('resize', () => this.resizeCanvas());
         this.setupInputControls();
     }
 
-    getBodyType(mass) {
-        if (mass < this.massThresholds.asteroid) return 'debris';
-        if (mass < this.massThresholds.planet) return 'asteroid';
-        if (mass < this.massThresholds.gasGiant) return 'planet';
-        if (mass < this.massThresholds.star) return 'gas-giant';
-        if (mass < this.massThresholds.neutronStar) return 'star';
-        if (mass < this.massThresholds.blackHole) return 'neutron-star';
-        return 'black-hole';
-    }
-
-    getRadiusFromMass(mass) {
-        // Black holes are special: very small despite massive weight
-        if (mass >= this.massThresholds.blackHole) {
-            return Math.cbrt(mass) * 0.8; // Compact but visibly impressive
-        }
-        // Neutron stars are also special: small but not as small as black holes
-        if (mass >= this.massThresholds.neutronStar) {
-            return Math.cbrt(mass) * 0.6; // Small radius for neutron stars
-        }
-        // Universal formula for other bodies: radius = cbrt(mass) * scale
-        return Math.cbrt(mass) * 2;
-    }
-
     resizeCanvas() {
         this.canvas.width = window.innerWidth - 250;
         this.canvas.height = window.innerHeight;
-        // Center camera on origin (0,0) - the camera position is the TOP-LEFT corner of the view
-        // So to center view on (0,0), we need to show from -width/2 to +width/2
         this.cameraX = -this.canvas.width / (2 * this.zoom);
         this.cameraY = -this.canvas.height / (2 * this.zoom);
     }
@@ -728,7 +365,6 @@ class Simulator {
         const worldX = (canvasX / this.zoom) + this.cameraX;
         const worldY = (canvasY / this.zoom) + this.cameraY;
 
-        // Spawn based on dropdown selection
         const spawnType = document.getElementById('spawn-type').value;
         switch (spawnType) {
             case 'random':
@@ -759,326 +395,62 @@ class Simulator {
     }
 
     setupInputControls() {
-        // Scroll wheel zoom (centered on dark matter at origin 0,0)
         this.canvas.addEventListener('wheel', (e) => {
             e.preventDefault();
             const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
             this.zoom *= zoomFactor;
-            this.zoom = Math.max(0.1, Math.min(this.zoom, 10)); // Clamp zoom 0.1 to 10
-
-            // Keep dark matter (0, 0) centered on screen by adjusting camera
-            // screenCenter = cameraPos + viewport_size / (2 * zoom)
-            // We want screenCenter = (0, 0), so:
-            // cameraPos = -viewport_size / (2 * zoom)
+            this.zoom = Math.max(0.1, Math.min(this.zoom, 10));
             this.cameraX = -this.canvas.width / (2 * this.zoom);
             this.cameraY = -this.canvas.height / (2 * this.zoom);
         });
 
-        // Click to spawn (use regular click event on canvas)
         this.canvas.addEventListener('click', (e) => {
             this.handleClick(e);
         });
 
-        // Mouse move for hover detection
         this.canvas.addEventListener('mousemove', (e) => {
             const rect = this.canvas.getBoundingClientRect();
             const screenX = e.clientX - rect.left;
             const screenY = e.clientY - rect.top;
-
-            // Convert to world coordinates
             const worldX = (screenX / this.zoom) + this.cameraX;
             const worldY = (screenY / this.zoom) + this.cameraY;
 
-            // Check if hovering over any body
             this.hoveredBody = null;
             for (const body of this.bodies) {
                 const dx = body.x - worldX;
                 const dy = body.y - worldY;
                 const dist = Math.sqrt(dx * dx + dy * dy);
-
-                // Use collision radius for hover detection
                 const hoverRadius = body.bodyType === 'black-hole' ? body.radius * 0.12 : body.radius;
                 if (dist < hoverRadius) {
                     this.hoveredBody = body;
-                    break; // Return first body found
+                    break;
                 }
             }
         });
 
-        // Clear hover when mouse leaves canvas
         this.canvas.addEventListener('mouseleave', () => {
             this.hoveredBody = null;
         });
     }
 
     spawnPlanet(x, y, mass = null) {
-        if (mass === null) {
-            mass = Math.random() * 145 + 5; // Asteroids to stars: 5-150
-        }
-        const radius = this.getRadiusFromMass(mass);
-        const bodyType = this.getBodyType(mass);
-
-        // Calculate radial direction from dark matter (origin) to spawn point
-        const radialAngle = Math.atan2(y, x);
-
-        // Bias velocity to be tangential (perpendicular to radial direction)
-        // Randomly choose to orbit clockwise or counterclockwise
-        const orbitalDirection = Math.random() < 0.5 ? Math.PI / 2 : -Math.PI / 2;
-        const variance = (Math.random() - 0.5) * 0.4; // ±0.2 radians of variance
-        const velocityAngle = radialAngle + orbitalDirection + variance;
-
-        const speed = Math.random() * 15 + 5; // Random momentum 5-20
-        const vx = Math.cos(velocityAngle) * speed;
-        const vy = Math.sin(velocityAngle) * speed;
-
-        const body = new Body(x, y, vx, vy, mass, radius, '#ffffff', bodyType);
-        this.bodies.push(body);
+        return super.spawnPlanet(x, y, mass);
     }
 
     spawnBlackHole(x, y) {
-        const mass = Math.random() * 150 + 100; // Big random margin: 100-250
-        const radius = this.getRadiusFromMass(mass);
-        const bodyType = this.getBodyType(mass);
-
-        const angle = Math.random() * Math.PI * 2;
-        const speed = Math.random() * 15 + 5;
-        const vx = Math.cos(angle) * speed;
-        const vy = Math.sin(angle) * speed;
-
-        const body = new Body(x, y, vx, vy, mass, radius, '#ffffff', bodyType);
-        this.bodies.push(body);
+        return super.spawnBlackHole(x, y);
     }
 
     spawnRandomCluster(x, y, count = 5) {
-        for (let i = 0; i < count; i++) {
-            const angle = Math.random() * Math.PI * 2;
-            const distance = Math.random() * 100 + 50;
-            const px = x + Math.cos(angle) * distance;
-            const py = y + Math.sin(angle) * distance;
-            const vx = Math.random() * 200 - 100;
-            const vy = Math.random() * 200 - 100;
-            const mass = Math.random() * 145 + 5; // Asteroids to stars: 5-150
-            const radius = this.getRadiusFromMass(mass);
-            const bodyType = this.getBodyType(mass);
-
-            const body = new Body(px, py, vx, vy, mass, radius, '#ffffff', bodyType);
-            this.bodies.push(body);
-        }
+        return super.spawnRandomCluster(x, y, count);
     }
 
     update(dt) {
-        if (!this.running) return;
-
-        dt *= this.timeScale;
-
-        // Calculate gravitational forces between bodies
-        for (let i = 0; i < this.bodies.length; i++) {
-            for (let j = i + 1; j < this.bodies.length; j++) {
-                const b1 = this.bodies[i];
-                const b2 = this.bodies[j];
-
-                const dx = b2.x - b1.x;
-                const dy = b2.y - b1.y;
-                const distSq = dx * dx + dy * dy + 100; // Add small epsilon to avoid singularities
-                const dist = Math.sqrt(distSq);
-
-                const force = (this.gravityConstant * b1.mass * b2.mass) / distSq;
-                const fx = (force * dx) / dist;
-                const fy = (force * dy) / dist;
-
-                b1.applyForce(fx, fy);
-                b2.applyForce(-fx, -fy);
-            }
-        }
-
-        // Dark matter attractor pulls everything toward center (invisible force)
-        for (const body of this.bodies) {
-            // Skip physics for bodies that are merging
-            if (body.isMerging) continue;
-
-            const dx = this.darkMatterX - body.x;
-            const dy = this.darkMatterY - body.y;
-            const distSq = dx * dx + dy * dy;
-
-            if (distSq < 1) continue; // Skip if already at center
-
-            const dist = Math.sqrt(distSq);
-            // Pull toward center with strength proportional to distance
-            const accelMagnitude = this.darkMatterStrength;
-            const ax = (accelMagnitude * dx) / dist;
-            const ay = (accelMagnitude * dy) / dist;
-
-            body.applyForce(ax * body.mass, ay * body.mass);
-        }
-
-        // Update positions
-        for (const body of this.bodies) {
-            // Skip physics for bodies that are merging (they're controlled by MergeEffect)
-            if (body.isMerging) continue;
-            body.update(dt);
-        }
-
-        // Handle collisions
-        this.handleCollisions();
-
-        // Update particles using pool
-        this.particlePool.update(dt);
-
-        // Update supernova effects
-        for (let i = this.supernovaEffects.length - 1; i >= 0; i--) {
-            this.supernovaEffects[i].update(dt);
-            if (this.supernovaEffects[i].isDone()) {
-                // Reset the body's supernova flag so it renders again as a neutron star
-                if (this.supernovaEffects[i].body) {
-                    console.log(`[SUPERNOVA END] Revealing neutron star: type=${this.supernovaEffects[i].body.bodyType}, mass=${this.supernovaEffects[i].body.mass.toFixed(1)}`);
-                    this.supernovaEffects[i].body.supernovaTime = 0;
-                }
-                this.supernovaEffects.splice(i, 1);
-            }
-        }
-
-        // Update merge effects
-        for (let i = this.mergeEffects.length - 1; i >= 0; i--) {
-            this.mergeEffects[i].update(dt);
-            if (this.mergeEffects[i].isDone()) {
-                const effect = this.mergeEffects[i];
-                effect.finish();
-                // Remove the original bodies from the array
-                this.bodies = this.bodies.filter(b => b !== effect.body1 && b !== effect.body2);
-                this.mergeEffects.splice(i, 1);
-            }
-        }
-
-        // Remove bodies that go too far off-screen (performance optimization)
-        this.bodies = this.bodies.filter(b => {
-            const distance = Math.sqrt(b.x * b.x + b.y * b.y);
-            return distance < 10000;
-        });
+        return super.update(dt);
     }
 
     handleCollisions() {
-        // Mark which bodies have already merged this frame to prevent cascading
-        const mergedThisFrame = new Set();
-
-        for (let i = 0; i < this.bodies.length; i++) {
-            // Skip if this body was already merged into another body
-            if (mergedThisFrame.has(i)) continue;
-
-            for (let j = i + 1; j < this.bodies.length; j++) {
-                // Skip if either body was already merged
-                if (mergedThisFrame.has(i) || mergedThisFrame.has(j)) continue;
-
-                const b1 = this.bodies[i];
-                const b2 = this.bodies[j];
-
-                const dx = b2.x - b1.x;
-                const dy = b2.y - b1.y;
-                const dist = Math.sqrt(dx * dx + dy * dy);
-
-                // Collision radius based on body type (not visual glow, just the body itself)
-                const getCollisionRadius = (body) => {
-                    if (body.bodyType === 'black-hole') {
-                        return body.radius * 0.12; // Event horizon
-                    }
-                    // All other bodies collide at their actual radius, ignoring glows/halos
-                    return body.radius;
-                };
-                const r1 = getCollisionRadius(b1);
-                const r2 = getCollisionRadius(b2);
-                const minDist = r1 + r2;
-
-                if (dist < minDist) {
-                    // Start merge animation instead of immediately merging
-                    const totalMass = b1.mass + b2.mass;
-                    const newVx = (b1.vx * b1.mass + b2.vx * b2.mass) / totalMass;
-                    const newVy = (b1.vy * b1.mass + b2.vy * b2.mass) / totalMass;
-                    const newX = (b1.x * b1.mass + b2.x * b2.mass) / totalMass;
-                    const newY = (b1.y * b1.mass + b2.y * b2.mass) / totalMass;
-
-                    // New radius using unified formula
-                    const newRadius = this.getRadiusFromMass(totalMass);
-                    const newBodyType = this.getBodyType(totalMass);
-                    const oldBodyType = b1.bodyType; // Save old type before updating
-
-                    // Conserve angular momentum (real calculation)
-                    const I1 = (2/5) * b1.mass * b1.radius * b1.radius;
-                    const I2 = (2/5) * b2.mass * b2.radius * b2.radius;
-                    const L1 = I1 * b1.rotationSpeed;
-                    const L2 = I2 * b2.rotationSpeed;
-                    const L_total = L1 + L2;
-
-                    const I_new = (2/5) * totalMass * newRadius * newRadius;
-                    const newRotationSpeed = I_new > 0 ? L_total / I_new : 0;
-
-                    // Create new merged body (not added to bodies array yet)
-                    const mergedBody = new Body(newX, newY, newVx, newVy, totalMass, newRadius, '#fff', newBodyType);
-                    mergedBody.rotationSpeed = newRotationSpeed;
-                    mergedBody.mergeScale = 0;
-                    mergedBody.mergeAlpha = 0;
-
-                    // Generate texture for merged body based on type
-                    if (newBodyType === 'planet') {
-                        mergedBody.texture = mergedBody.generateEarthTexture(newRadius);
-                    } else if (newBodyType === 'gas-giant') {
-                        mergedBody.texture = mergedBody.generateGasGiantTexture(newRadius);
-                        // Randomize all ring properties for merged gas giant (biased towards fainter)
-                        mergedBody.ringScale = 0.5 + Math.random() * 1.0; // 0.5 to 1.5
-                        // Random number of rings: 1-5
-                        mergedBody.ringCount = Math.floor(Math.random() * 5) + 1;
-                        // Randomize opacity per ring independently
-                        mergedBody.ringOpacities = [];
-                        mergedBody.ringVisible = [];
-                        for (let i = 0; i < mergedBody.ringCount; i++) {
-                            mergedBody.ringOpacities.push(0.1 + Math.random() * Math.random() * 0.25);
-                            mergedBody.ringVisible.push(Math.random() < 0.5); // 50% chance each ring is visible
-                        }
-                        mergedBody.ringHueShift = Math.random() * 40 - 20; // -20 to +20 hue shift
-                        mergedBody.ringLightness = 35 + Math.random() * 20; // 35 to 55 lightness
-                    } else if (newBodyType === 'star') {
-                        mergedBody.texture = mergedBody.generateStarTexture(newRadius, totalMass);
-                    } else if (newBodyType === 'asteroid') {
-                        mergedBody.texture = mergedBody.generateAsteroidTexture(newRadius);
-                        // Generate irregular shape for merged asteroid
-                        mergedBody.asteroidVertices = mergedBody.generateAsteroidShape(newRadius);
-                    } else if (newBodyType === 'neutron-star') {
-                        mergedBody.texture = mergedBody.generateNeutronStarTexture(newRadius);
-                    } else if (newBodyType === 'black-hole') {
-                        console.log(`[BLACK HOLE] Merged BH: mass=${totalMass.toFixed(0)}, radius=${newRadius.toFixed(2)}`);
-                        mergedBody.texture = mergedBody.generateBlackHoleTexture(newRadius);
-                        mergedBody.blackHoleFlares = mergedBody.generateBlackHoleFlares(newRadius);
-                    }
-
-                    // Add merged body to bodies array
-                    this.bodies.push(mergedBody);
-
-                    // Create merge animation effect
-                    const mergeDuration = newBodyType === 'black-hole' ? 0.25 : 0.5; // 2x faster merge, BH still faster
-                    this.mergeEffects.push(new MergeEffect(b1, b2, mergedBody, mergeDuration));
-
-                    // Create collision explosion (except for black holes)
-                    if (newBodyType !== 'black-hole') {
-                        const explosionIntensity = Math.min(2.0, totalMass / 50); // Scale intensity by mass
-                        this.createExplosion(newX, newY, totalMass, explosionIntensity);
-                    }
-
-                    // Trigger supernova if star becomes neutron star
-                    if (newBodyType === 'neutron-star' && oldBodyType === 'star') {
-                        this.createSupernovaWithBody(newX, newY, newRadius, mergedBody);
-                    }
-
-                    // Mark both bodies as merged so they won't collide again
-                    mergedThisFrame.add(i);
-                    mergedThisFrame.add(j);
-                }
-            }
-        }
-
-        // Remove all bodies that were merged (in reverse order to maintain indices)
-        for (let i = this.bodies.length - 1; i >= 0; i--) {
-            if (mergedThisFrame.has(i)) {
-                this.bodies.splice(i, 1);
-            }
-        }
+        return super.handleCollisions();
     }
 
     draw() {
@@ -1173,14 +545,12 @@ class Simulator {
                     this.ctx.closePath();
                     this.ctx.fill();
 
-                    // Draw craters on top
                     this.ctx.fillStyle = '#666666';
-                    for (let i = 0; i < 2; i++) {
-                        const angle = Math.random() * Math.PI * 2;
-                        const distance = screenRadius * (0.4 + Math.random() * 0.3);
-                        const craterX = Math.cos(angle) * distance;
-                        const craterY = Math.sin(angle) * distance;
-                        const craterSize = screenRadius * (0.1 + Math.random() * 0.1);
+                    const craters = body.craters || [];
+                    for (const crater of craters) {
+                        const craterX = Math.cos(crater.angle) * screenRadius * crater.distance;
+                        const craterY = Math.sin(crater.angle) * screenRadius * crater.distance;
+                        const craterSize = screenRadius * crater.size;
                         this.ctx.beginPath();
                         this.ctx.arc(craterX, craterY, craterSize, 0, Math.PI * 2);
                         this.ctx.fill();
@@ -1337,13 +707,11 @@ class Simulator {
 
                     const ringRadius = ringRadii[ringIdx];
 
-                    // Randomized color per body
-                    const hue = 35 + body.ringHueShift + ringIdx * 5; // Base hue + shift + per-ring variation
-                    const saturation = 60 + Math.random() * 30; // 60 to 90
-                    const lightness = body.ringLightness + ringIdx * 4; // Per-body base lightness + per-ring variation
-                    const opacity = body.ringOpacities[ringIdx]; // Per-ring opacity
+                    const hue = 35 + body.ringHueShift + ringIdx * 5;
+                    const saturation = body.ringSaturations?.[ringIdx] ?? 75;
+                    const lightness = body.ringLightness + ringIdx * 4;
+                    const opacity = body.ringOpacities[ringIdx];
 
-                    // Draw ring as a circle with stroke
                     this.ctx.strokeStyle = `hsla(${hue}, ${saturation}%, ${lightness}%, ${opacity})`;
                     this.ctx.lineWidth = ringWidth;
                     this.ctx.lineCap = 'round';
@@ -1873,47 +1241,23 @@ class Simulator {
     }
 
     createExplosion(x, y, mass, intensity = 1.0) {
-        // Create an explosion proportional to mass with some randomness, capped to prevent lag
-        const baseParticleCount = Math.max(2, Math.min(mass * 0.2, 80)); // Cap at 80 particles
-        const particleCount = Math.floor(baseParticleCount * (0.7 + Math.random() * 0.6)); // ±30% randomness
-
-        const baseSpeed = 20;
-        const speedVariance = 20;
-        const baseLifetime = 1.0;
-        const lifetimeVariance = 1.0;
-
-        for (let i = 0; i < particleCount; i++) {
-            const angle = (i / particleCount) * Math.PI * 2 + (Math.random() - 0.5) * 0.5;
-            const speed = (Math.random() * speedVariance + baseSpeed) * intensity;
-            const vx = Math.cos(angle) * speed;
-            const vy = Math.sin(angle) * speed;
-            const lifetime = Math.random() * lifetimeVariance + baseLifetime;
-
-            this.particlePool.acquire(x, y, vx, vy, lifetime);
-        }
+        return super.createExplosion(x, y, mass, intensity);
     }
 
     createSupernovaWithBody(x, y, radius, body) {
-        // Supernova is a special cinematic explosion for star -> neutron star transition
-        console.log(`[SUPERNOVA] Created at (${x.toFixed(1)}, ${y.toFixed(1)}) for body type: ${body ? body.bodyType : 'unknown'}`);
-        this.supernovaEffects.push(new SupernovaEffect(x, y, body, 15.0));
-        this.createExplosion(x, y, 50, 2.5); // High intensity particles
+        return super.createSupernovaWithBody(x, y, radius, body);
     }
 
     createSupernova(x, y, radius) {
-        // Legacy method for compatibility
-        this.createSupernovaWithBody(x, y, radius, null);
+        return super.createSupernova(x, y, radius);
     }
 
     clearAll() {
-        this.bodies = [];
-        this.particlePool.clear();
-        this.supernovaEffects = [];
-        this.mergeEffects = [];
+        return super.clearAll();
     }
 
     getTotalMass() {
-        return this.bodies.reduce((sum, b) => sum + b.mass, 0).toFixed(1);
+        return super.getTotalMass();
     }
 
     animate() {
@@ -1935,111 +1279,98 @@ class Simulator {
         this.frameCount++;
         if (this.frameCount % 10 === 0) {
             const now = Date.now();
-            this.fps = Math.round(1000 / ((now - this.lastTime) / 10));
+            const elapsed = now - this.lastFpsSampleTime;
+            if (elapsed > 0) {
+                this.fps = Math.round((10 * 1000) / elapsed);
+            }
+            this.lastFpsSampleTime = now;
         }
 
-        document.getElementById('fps').textContent = this.fps;
-        document.getElementById('body-count').textContent = this.bodies.length;
-        document.getElementById('total-mass').textContent = this.getTotalMass();
+        const fpsNode = document.getElementById('fps');
+        const bodyCountNode = document.getElementById('body-count');
+        const totalMassNode = document.getElementById('total-mass');
+        if (fpsNode) fpsNode.textContent = this.fps;
+        if (bodyCountNode) bodyCountNode.textContent = this.bodies.length;
+        if (totalMassNode) totalMassNode.textContent = this.getTotalMass();
     }
 }
 
-// ==================== UI SETUP ====================
+function bootstrapSimulatorApp() {
+    const canvas = document.getElementById('canvas');
+    const sim = new Simulator(canvas);
 
-const canvas = document.getElementById('canvas');
-const sim = new Simulator(canvas);
+    const mass1 = Math.random() * 145 + 5;
+    const mass2 = Math.random() * 145 + 5;
+    sim.spawnPlanet(-200, -150, mass1);
+    sim.spawnPlanet(200, 150, mass2);
 
-// Spawn two random objects below stellar mass with random velocities
-const mass1 = Math.random() * 145 + 5; // 5-150 (below star threshold)
-const mass2 = Math.random() * 145 + 5;
-sim.spawnPlanet(-200, -150, mass1);
-sim.spawnPlanet(200, 150, mass2);
+    const angle1 = Math.random() * Math.PI * 2;
+    const speed1 = Math.random() * 30 + 20;
+    sim.bodies[0].vx = Math.cos(angle1) * speed1;
+    sim.bodies[0].vy = Math.sin(angle1) * speed1;
 
-// Give them random velocities
-const angle1 = Math.random() * Math.PI * 2;
-const speed1 = Math.random() * 30 + 20;
-sim.bodies[0].vx = Math.cos(angle1) * speed1;
-sim.bodies[0].vy = Math.sin(angle1) * speed1;
+    const angle2 = Math.random() * Math.PI * 2;
+    const speed2 = Math.random() * 30 + 20;
+    sim.bodies[1].vx = Math.cos(angle2) * speed2;
+    sim.bodies[1].vy = Math.sin(angle2) * speed2;
 
-const angle2 = Math.random() * Math.PI * 2;
-const speed2 = Math.random() * 30 + 20;
-sim.bodies[1].vx = Math.cos(angle2) * speed2;
-sim.bodies[1].vy = Math.sin(angle2) * speed2;
+    document.getElementById('btn-play-pause').addEventListener('click', (e) => {
+        sim.running = !sim.running;
+        e.target.textContent = sim.running ? 'Pause' : 'Play';
+        e.target.classList.toggle('active');
+    });
 
+    document.getElementById('btn-clear').addEventListener('click', () => {
+        sim.clearAll();
+    });
 
-// Spawn dropdown - spawns immediately on selection change
-const spawnX = () => sim.cameraX + sim.canvas.width / 2 / sim.zoom;
-const spawnY = () => sim.cameraY + sim.canvas.height / 2 / sim.zoom;
+    document.getElementById('btn-reset-zoom').addEventListener('click', () => {
+        sim.zoom = 1;
+        sim.cameraX = -sim.canvas.width / 2;
+        sim.cameraY = -sim.canvas.height / 2;
+    });
 
-const spawnBodyByType = (type) => {
-    const x = spawnX();
-    const y = spawnY();
+    document.getElementById('speed-slider').addEventListener('input', (e) => {
+        sim.timeScale = parseFloat(e.target.value);
+        document.getElementById('speed-value').textContent = sim.timeScale.toFixed(1) + 'x';
+    });
 
-    switch (type) {
-        case 'random':
-            // Spawn a completely random body (5-145 mass range)
-            sim.spawnPlanet(x, y, Math.random() * 140 + 5);
-            break;
-        case 'asteroid':
-            // 5-20 mass with full variance
-            sim.spawnPlanet(x, y, Math.random() * 15 + 5);
-            break;
-        case 'planet':
-            // 20-60 mass with full variance
-            sim.spawnPlanet(x, y, Math.random() * 40 + 20);
-            break;
-        case 'gas-giant':
-            // 60-150 mass with full variance
-            sim.spawnPlanet(x, y, Math.random() * 90 + 60);
-            break;
-        case 'star':
-            // 150-1500 mass: from red star to blue star
-            sim.spawnPlanet(x, y, Math.random() * 1350 + 150);
-            break;
-        case 'neutron-star':
-            // 1500-3000 mass: full range of neutron stars
-            sim.spawnPlanet(x, y, Math.random() * 1500 + 1500);
-            break;
-        case 'black-hole':
-            // 3000+ mass: various black hole sizes
-            sim.spawnPlanet(x, y, Math.random() * 3000 + 3000);
-            break;
-    }
-};
+    document.getElementById('gravity-slider').addEventListener('input', (e) => {
+        sim.gravityConstant = parseFloat(e.target.value);
+        document.getElementById('gravity-value').textContent = sim.gravityConstant.toFixed(1);
+    });
 
+    document.getElementById('dark-matter-slider').addEventListener('input', (e) => {
+        sim.darkMatterStrength = parseFloat(e.target.value);
+        document.getElementById('dark-matter-value').textContent = sim.darkMatterStrength.toFixed(1);
+    });
 
-// Control buttons
-document.getElementById('btn-play-pause').addEventListener('click', (e) => {
-    sim.running = !sim.running;
-    e.target.textContent = sim.running ? 'Pause' : 'Play';
-    e.target.classList.toggle('active');
-});
+    sim.animate();
+    return sim;
+}
 
-document.getElementById('btn-clear').addEventListener('click', () => {
-    sim.clearAll();
-});
+function hasAppShell() {
+    const requiredIds = [
+        'canvas',
+        'btn-play-pause',
+        'btn-clear',
+        'btn-reset-zoom',
+        'speed-slider',
+        'gravity-slider',
+        'dark-matter-slider',
+        'speed-value',
+        'gravity-value',
+        'dark-matter-value',
+    ];
 
-document.getElementById('btn-reset-zoom').addEventListener('click', () => {
-    sim.zoom = 1;
-    sim.cameraX = -sim.canvas.width / 2;
-    sim.cameraY = -sim.canvas.height / 2;
-});
+    return requiredIds.every((id) => document.getElementById(id));
+}
 
-// Sliders
-document.getElementById('speed-slider').addEventListener('input', (e) => {
-    sim.timeScale = parseFloat(e.target.value);
-    document.getElementById('speed-value').textContent = sim.timeScale.toFixed(1) + 'x';
-});
+globalThis.Simulator = Simulator;
+globalThis.Body = BrowserBody;
+globalThis.SupernovaEffect = SupernovaEffect;
+globalThis.bootstrapSimulatorApp = bootstrapSimulatorApp;
 
-document.getElementById('gravity-slider').addEventListener('input', (e) => {
-    sim.gravityConstant = parseFloat(e.target.value);
-    document.getElementById('gravity-value').textContent = sim.gravityConstant.toFixed(1);
-});
-
-document.getElementById('dark-matter-slider').addEventListener('input', (e) => {
-    sim.darkMatterStrength = parseFloat(e.target.value);
-    document.getElementById('dark-matter-value').textContent = sim.darkMatterStrength.toFixed(1);
-});
-
-// Start the animation loop
-sim.animate();
+if (hasAppShell()) {
+    globalThis.sim = bootstrapSimulatorApp();
+}
