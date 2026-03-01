@@ -736,20 +736,17 @@ class Simulator {
         let isPanning = false;
         let panStartX = 0;
         let panStartY = 0;
-        let panDistance = 0; // Track how far we've panned
 
         this.canvas.addEventListener('mousedown', (e) => {
             isPanning = true;
             panStartX = e.clientX;
             panStartY = e.clientY;
-            panDistance = 0;
         });
 
-        document.addEventListener('mousemove', (e) => {
+        this.canvas.addEventListener('mousemove', (e) => {
             if (isPanning) {
                 const deltaX = e.clientX - panStartX;
                 const deltaY = e.clientY - panStartY;
-                panDistance += Math.sqrt(deltaX * deltaX + deltaY * deltaY);
                 this.cameraX -= deltaX / this.zoom;
                 this.cameraY -= deltaY / this.zoom;
                 panStartX = e.clientX;
@@ -757,11 +754,7 @@ class Simulator {
             }
         });
 
-        document.addEventListener('mouseup', (e) => {
-            // Only count as a click if we didn't move much
-            if (panDistance < 5 && isPanning) {
-                this.handleClick(e);
-            }
+        this.canvas.addEventListener('mouseup', () => {
             isPanning = false;
         });
 
@@ -771,6 +764,11 @@ class Simulator {
             const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
             this.zoom *= zoomFactor;
             this.zoom = Math.max(0.1, Math.min(this.zoom, 10)); // Clamp zoom 0.1 to 10
+        });
+
+        // Click to spawn (use regular click event on canvas)
+        this.canvas.addEventListener('click', (e) => {
+            this.handleClick(e);
         });
     }
 
