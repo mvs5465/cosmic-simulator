@@ -849,7 +849,7 @@ class Simulator {
                     this.bodies.push(mergedBody);
 
                     // Create merge animation effect
-                    const mergeDuration = newBodyType === 'black-hole' ? 0.5 : 1.0; // BH merges faster and quieter
+                    const mergeDuration = newBodyType === 'black-hole' ? 0.25 : 0.5; // 2x faster merge, BH still faster
                     this.mergeEffects.push(new MergeEffect(b1, b2, mergedBody, mergeDuration));
 
                     // Create collision explosion (except for black holes)
