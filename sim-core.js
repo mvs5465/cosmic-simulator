@@ -1,6 +1,44 @@
 // Shared simulation core used by both the browser runtime and Node tests.
 
 (function(globalScope) {
+    function getBlackHoleRenderMetrics(screenRadius) {
+        const normalizedRadius = Math.max(screenRadius, 1);
+        const coreRadius = normalizedRadius * 0.24;
+        const diskInnerRadius = normalizedRadius * 0.5;
+        const diskOuterRadius = normalizedRadius;
+
+        return {
+            coreRadius,
+            diskInnerRadius,
+            diskOuterRadius,
+        };
+    }
+
+    function shouldRenderBlackHoleFlares(body) {
+        if (!body || body.bodyType !== 'black-hole') {
+            return false;
+        }
+
+        return !body.isMerging;
+    }
+
+    function shouldDrawVelocityVector(body, threshold = 10) {
+        if (!body || body.bodyType === 'black-hole') {
+            return false;
+        }
+
+        const vx = body.vx ?? 0;
+        const vy = body.vy ?? 0;
+        return Math.hypot(vx, vy) > threshold;
+    }
+
+    function getBodyMergeVisualState(body) {
+        return {
+            scale: body?.mergeScale ?? 1,
+            alpha: body?.mergeAlpha ?? 1,
+        };
+    }
+
     class Body {
         constructor(x, y, vx, vy, mass, radius, color, bodyType = 'planet') {
             this.x = x;
@@ -550,6 +588,10 @@
         SupernovaEffect,
         MergeEffect,
         SimulationCore,
+        getBlackHoleRenderMetrics,
+        shouldRenderBlackHoleFlares,
+        shouldDrawVelocityVector,
+        getBodyMergeVisualState,
     };
 
     if (typeof module !== 'undefined' && module.exports) {

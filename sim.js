@@ -8,6 +8,10 @@ const {
     Body,
     SupernovaEffect,
     SimulationCore,
+    getBlackHoleRenderMetrics,
+    shouldRenderBlackHoleFlares,
+    shouldDrawVelocityVector,
+    getBodyMergeVisualState,
 } = coreExports;
 
 class BrowserBody extends Body {
@@ -273,23 +277,29 @@ class BrowserBody extends Body {
         const ctx = canvas.getContext('2d');
         const centerX = size / 2;
         const centerY = size / 2;
-        const innerDiskRadius = size * 0.25;
-        const outerDiskRadius = size * 0.5;
+        const metrics = getBlackHoleRenderMetrics(size / 2);
 
         ctx.save();
         ctx.beginPath();
-        ctx.arc(centerX, centerY, outerDiskRadius, 0, Math.PI * 2);
-        ctx.arc(centerX, centerY, innerDiskRadius, 0, Math.PI * 2, true);
+        ctx.arc(centerX, centerY, metrics.diskOuterRadius, 0, Math.PI * 2);
+        ctx.arc(centerX, centerY, metrics.diskInnerRadius, 0, Math.PI * 2, true);
         ctx.clip();
 
-        const diskGradient = ctx.createRadialGradient(centerX, centerY, innerDiskRadius, centerX, centerY, outerDiskRadius);
+        const diskGradient = ctx.createRadialGradient(
+            centerX,
+            centerY,
+            metrics.diskInnerRadius,
+            centerX,
+            centerY,
+            metrics.diskOuterRadius
+        );
         diskGradient.addColorStop(0, 'rgba(255, 200, 100, 0.9)');
         diskGradient.addColorStop(0.3, 'rgba(255, 150, 80, 0.8)');
         diskGradient.addColorStop(0.6, 'rgba(255, 100, 50, 0.5)');
         diskGradient.addColorStop(1, 'rgba(200, 50, 0, 0)');
         ctx.fillStyle = diskGradient;
         ctx.beginPath();
-        ctx.arc(centerX, centerY, outerDiskRadius, 0, Math.PI * 2);
+        ctx.arc(centerX, centerY, metrics.diskOuterRadius, 0, Math.PI * 2);
         ctx.fill();
 
         const flareCount = Math.max(4, Math.ceil(size / 16));
@@ -312,13 +322,13 @@ class BrowserBody extends Body {
 
         ctx.fillStyle = '#000000';
         ctx.beginPath();
-        ctx.arc(centerX, centerY, size * 0.12, 0, Math.PI * 2);
+        ctx.arc(centerX, centerY, metrics.coreRadius, 0, Math.PI * 2);
         ctx.fill();
 
         ctx.strokeStyle = 'rgba(200, 200, 200, 0.4)';
         ctx.lineWidth = 1;
         ctx.beginPath();
-        ctx.arc(centerX, centerY, size * 0.12, 0, Math.PI * 2);
+        ctx.arc(centerX, centerY, metrics.coreRadius, 0, Math.PI * 2);
         ctx.stroke();
 
         return canvas;
@@ -494,8 +504,7 @@ class Simulator extends SimulationCore {
             let screenRadius = Math.max(body.radius * this.zoom, 1);
 
             // Apply merge animation scaling
-            const mergeScale = body.mergeScale !== undefined ? body.mergeScale : 1;
-            const mergeAlpha = body.mergeAlpha !== undefined ? body.mergeAlpha : 1;
+            const { scale: mergeScale, alpha: mergeAlpha } = getBodyMergeVisualState(body);
             screenRadius *= mergeScale;
 
             // Safety check: skip if body has invalid properties
@@ -768,18 +777,11 @@ class Simulator extends SimulationCore {
                 this.ctx.arc(screenX, screenY, screenRadius, 0, Math.PI * 2);
                 this.ctx.fill();
             } else if (body.bodyType === 'black-hole') {
-                // Black holes: use procedural rendering for large ones to avoid pixelation
-                if (screenRadius > 100) {
-                    // Draw procedurally for large black holes
-                    this.drawProceduralBlackHole(screenX, screenY, screenRadius, body.pulseTime, body);
-                } else if (body.texture) {
-                    // Use texture for small black holes
+                if (body.texture) {
                     this.ctx.save();
                     this.ctx.translate(screenX, screenY);
-                    // Rotate the accretion disk
-                    this.ctx.rotate(body.pulseTime * 2); // Fast rotation
+                    this.ctx.rotate(body.pulseTime * 2);
 
-                    // Clip to circle
                     this.ctx.beginPath();
                     this.ctx.arc(0, 0, screenRadius, 0, Math.PI * 2);
                     this.ctx.clip();
@@ -787,10 +789,7 @@ class Simulator extends SimulationCore {
                     this.ctx.drawImage(body.texture, -screenRadius, -screenRadius, screenRadius * 2, screenRadius * 2);
                     this.ctx.restore();
                 } else {
-                    this.ctx.fillStyle = '#000000';
-                    this.ctx.beginPath();
-                    this.ctx.arc(screenX, screenY, screenRadius, 0, Math.PI * 2);
-                    this.ctx.fill();
+                    this.drawProceduralBlackHole(screenX, screenY, screenRadius, body.pulseTime, body);
                 }
             } else if (body.texture) {
                 // Planets, gas giants, and stars with textures
@@ -813,8 +812,7 @@ class Simulator extends SimulationCore {
                 this.ctx.fill();
             }
 
-            // Draw velocity vector for debugging
-            if (Math.sqrt(body.vx * body.vx + body.vy * body.vy) > 10) {
+            if (shouldDrawVelocityVector(body)) {
                 this.ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
                 this.ctx.lineWidth = 1;
                 this.ctx.beginPath();
@@ -836,14 +834,14 @@ class Simulator extends SimulationCore {
         for (const effect of this.mergeEffects) {
             // Draw accretion disks for both merging black holes
             if (effect.body1.bodyType === 'black-hole') {
-                this.drawAccretionDisk(effect.body1.x, effect.body1.y, effect.body1.radius, effect.body1.pulseTime);
+                this.drawAccretionDisk(effect.body1);
             }
             if (effect.body2.bodyType === 'black-hole') {
-                this.drawAccretionDisk(effect.body2.x, effect.body2.y, effect.body2.radius, effect.body2.pulseTime);
+                this.drawAccretionDisk(effect.body2);
             }
             // Draw accretion disk for merged black hole if it's a BH
             if (effect.mergedBody.bodyType === 'black-hole') {
-                this.drawAccretionDisk(effect.mergedBody.x, effect.mergedBody.y, effect.mergedBody.radius, effect.mergedBody.pulseTime);
+                this.drawAccretionDisk(effect.mergedBody);
             }
         }
 
@@ -864,25 +862,14 @@ class Simulator extends SimulationCore {
         this.ctx.save();
         this.ctx.translate(screenX, screenY);
         this.ctx.rotate(pulseTime * 2);
+        const metrics = getBlackHoleRenderMetrics(screenRadius);
 
-        // Dark center first
-        this.ctx.fillStyle = '#000000';
         this.ctx.beginPath();
-        this.ctx.arc(0, 0, screenRadius, 0, Math.PI * 2);
-        this.ctx.fill();
-
-        // Accretion disk as ring
-        const innerDiskRadius = screenRadius * 0.25;
-        const outerDiskRadius = screenRadius * 0.5;
-
-        // Create ring clipping region
-        this.ctx.beginPath();
-        this.ctx.arc(0, 0, outerDiskRadius, 0, Math.PI * 2);
-        this.ctx.arc(0, 0, innerDiskRadius, 0, Math.PI * 2, true);
+        this.ctx.arc(0, 0, metrics.diskOuterRadius, 0, Math.PI * 2);
+        this.ctx.arc(0, 0, metrics.diskInnerRadius, 0, Math.PI * 2, true);
         this.ctx.clip();
 
-        // Draw disk gradient
-        const diskGradient = this.ctx.createRadialGradient(0, 0, innerDiskRadius, 0, 0, outerDiskRadius);
+        const diskGradient = this.ctx.createRadialGradient(0, 0, metrics.diskInnerRadius, 0, 0, metrics.diskOuterRadius);
         diskGradient.addColorStop(0, 'rgba(255, 200, 100, 0.9)');
         diskGradient.addColorStop(0.3, 'rgba(255, 150, 80, 0.8)');
         diskGradient.addColorStop(0.6, 'rgba(255, 100, 50, 0.5)');
@@ -890,11 +877,10 @@ class Simulator extends SimulationCore {
 
         this.ctx.fillStyle = diskGradient;
         this.ctx.beginPath();
-        this.ctx.arc(0, 0, outerDiskRadius, 0, Math.PI * 2);
+        this.ctx.arc(0, 0, metrics.diskOuterRadius, 0, Math.PI * 2);
         this.ctx.fill();
 
-        // Draw cached flares if available
-        if (body && body.blackHoleFlares) {
+        if (shouldRenderBlackHoleFlares(body) && body.blackHoleFlares) {
             for (const flare of body.blackHoleFlares) {
                 const x = Math.cos(flare.angle) * flare.distance * screenRadius;
                 const y = Math.sin(flare.angle) * flare.distance * screenRadius;
@@ -910,31 +896,40 @@ class Simulator extends SimulationCore {
             }
         }
 
+        this.ctx.fillStyle = '#000000';
+        this.ctx.beginPath();
+        this.ctx.arc(0, 0, metrics.coreRadius, 0, Math.PI * 2);
+        this.ctx.fill();
+
+        this.ctx.strokeStyle = 'rgba(200, 200, 200, 0.4)';
+        this.ctx.lineWidth = 1;
+        this.ctx.beginPath();
+        this.ctx.arc(0, 0, metrics.coreRadius, 0, Math.PI * 2);
+        this.ctx.stroke();
+
         this.ctx.restore();
     }
 
-    drawAccretionDisk(x, y, radius, pulseTime) {
-        const screenX = (x - this.cameraX) * this.zoom;
-        const screenY = (y - this.cameraY) * this.zoom;
-        const screenRadius = Math.max(radius * this.zoom, 1);
+    drawAccretionDisk(body) {
+        const screenX = (body.x - this.cameraX) * this.zoom;
+        const screenY = (body.y - this.cameraY) * this.zoom;
+        const { scale: mergeScale, alpha: mergeAlpha } = getBodyMergeVisualState(body);
+        const screenRadius = Math.max(body.radius * this.zoom, 1) * mergeScale;
 
         if (screenRadius < 2) return; // Too small to render
 
         this.ctx.save();
         this.ctx.translate(screenX, screenY);
-        this.ctx.rotate(pulseTime * 2); // Rotating disk
+        this.ctx.rotate(body.pulseTime * 2); // Rotating disk
+        this.ctx.globalAlpha = mergeAlpha;
+        const metrics = getBlackHoleRenderMetrics(screenRadius);
 
-        const outerDiskRadius = screenRadius * 0.5;
-        const innerDiskRadius = screenRadius * 0.25;
-
-        // Create clipping region for ring
         this.ctx.beginPath();
-        this.ctx.arc(0, 0, outerDiskRadius, 0, Math.PI * 2);
-        this.ctx.arc(0, 0, innerDiskRadius, 0, Math.PI * 2, true);
+        this.ctx.arc(0, 0, metrics.diskOuterRadius, 0, Math.PI * 2);
+        this.ctx.arc(0, 0, metrics.diskInnerRadius, 0, Math.PI * 2, true);
         this.ctx.clip();
 
-        // Draw gradient disk
-        const diskGradient = this.ctx.createRadialGradient(0, 0, innerDiskRadius, 0, 0, outerDiskRadius);
+        const diskGradient = this.ctx.createRadialGradient(0, 0, metrics.diskInnerRadius, 0, 0, metrics.diskOuterRadius);
         diskGradient.addColorStop(0, 'rgba(255, 200, 100, 0.9)');
         diskGradient.addColorStop(0.3, 'rgba(255, 150, 80, 0.8)');
         diskGradient.addColorStop(0.6, 'rgba(255, 100, 50, 0.5)');
@@ -942,8 +937,19 @@ class Simulator extends SimulationCore {
 
         this.ctx.fillStyle = diskGradient;
         this.ctx.beginPath();
-        this.ctx.arc(0, 0, outerDiskRadius, 0, Math.PI * 2);
+        this.ctx.arc(0, 0, metrics.diskOuterRadius, 0, Math.PI * 2);
         this.ctx.fill();
+
+        this.ctx.fillStyle = '#000000';
+        this.ctx.beginPath();
+        this.ctx.arc(0, 0, metrics.coreRadius, 0, Math.PI * 2);
+        this.ctx.fill();
+
+        this.ctx.strokeStyle = 'rgba(200, 200, 200, 0.4)';
+        this.ctx.lineWidth = 1;
+        this.ctx.beginPath();
+        this.ctx.arc(0, 0, metrics.coreRadius, 0, Math.PI * 2);
+        this.ctx.stroke();
 
         this.ctx.restore();
     }
