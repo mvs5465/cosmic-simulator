@@ -7,6 +7,7 @@ if (!coreExports) {
 const {
     Body,
     AccretionBurstEffect,
+    KilonovaEffect,
     SupernovaEffect,
     SimulationCore,
     getSpawnClassConfig,
@@ -394,7 +395,7 @@ class Simulator extends SimulationCore {
         this.fps = 60;
         this.cameraX = 0;
         this.cameraY = 0;
-        this.defaultZoom = 2;
+        this.defaultZoom = 4 / 3;
         this.zoom = this.defaultZoom;
         this.hoveredBody = null;
         this.animationFrameId = null;
@@ -539,6 +540,62 @@ class Simulator extends SimulationCore {
         return super.handleCollisions();
     }
 
+    getTrailColor(body) {
+        switch (body.bodyType) {
+        case 'debris':
+        case 'asteroid':
+            return { red: 180, green: 180, blue: 190 };
+        case 'planet':
+            return { red: 120, green: 220, blue: 255 };
+        case 'gas-giant':
+            return { red: 255, green: 190, blue: 120 };
+        case 'star':
+            return getStarColorChannels(body.mass);
+        case 'white-dwarf':
+            return { red: 219, green: 234, blue: 254 };
+        case 'neutron-star':
+            return { red: 100, green: 220, blue: 255 };
+        case 'black-hole':
+            return { red: 255, green: 180, blue: 90 };
+        default:
+            return { red: 220, green: 220, blue: 230 };
+        }
+    }
+
+    drawTrails() {
+        for (const body of this.bodies) {
+            if (!body.trailPoints || body.trailPoints.length < 2) {
+                continue;
+            }
+
+            const { red, green, blue } = this.getTrailColor(body);
+            const lineWidth = Math.max(1, Math.min(4, body.radius * this.zoom * 0.08));
+
+            for (let i = 1; i < body.trailPoints.length; i++) {
+                const startPoint = body.trailPoints[i - 1];
+                const endPoint = body.trailPoints[i];
+                const startX = (startPoint.x - this.cameraX) * this.zoom;
+                const startY = (startPoint.y - this.cameraY) * this.zoom;
+                const endX = (endPoint.x - this.cameraX) * this.zoom;
+                const endY = (endPoint.y - this.cameraY) * this.zoom;
+
+                if ((startX < -100 && endX < -100) || (startX > this.canvas.width + 100 && endX > this.canvas.width + 100) ||
+                    (startY < -100 && endY < -100) || (startY > this.canvas.height + 100 && endY > this.canvas.height + 100)) {
+                    continue;
+                }
+
+                const alpha = (i / (body.trailPoints.length - 1)) * 0.28;
+                this.ctx.strokeStyle = `rgba(${red}, ${green}, ${blue}, ${alpha})`;
+                this.ctx.lineWidth = lineWidth;
+                this.ctx.lineCap = 'round';
+                this.ctx.beginPath();
+                this.ctx.moveTo(startX, startY);
+                this.ctx.lineTo(endX, endY);
+                this.ctx.stroke();
+            }
+        }
+    }
+
     draw() {
         // Black background
         this.ctx.fillStyle = '#000000';
@@ -552,6 +609,9 @@ class Simulator extends SimulationCore {
 
         // Draw grid (optional)
         this.drawGrid();
+
+        // Draw motion trails beneath bodies
+        this.drawTrails();
 
         // Draw bodies (before supernova so it renders on top)
         // Note: regular bodies drawn here, then supernova effects on top
@@ -928,6 +988,9 @@ class Simulator extends SimulationCore {
         // Draw accretion bursts ON TOP of bodies
         this.drawAccretionBurstEffects();
 
+        // Draw kilonovas above bodies but below supernovas
+        this.drawKilonovaEffects();
+
         // Draw supernova effects ON TOP of bodies
         this.drawSupernovaEffects();
 
@@ -1245,6 +1308,59 @@ class Simulator extends SimulationCore {
         }
     }
 
+    drawKilonovaEffects() {
+        for (const effect of this.kilonovaEffects) {
+            const props = effect.getProperties();
+            const burstX = effect.positionLocked ? effect.lockedX : effect.x;
+            const burstY = effect.positionLocked ? effect.lockedY : effect.y;
+            const screenX = (burstX - this.cameraX) * this.zoom;
+            const screenY = (burstY - this.cameraY) * this.zoom;
+            const glowRadius = props.radius * this.zoom;
+            const shellRadius = props.shellRadius * this.zoom;
+            const secondaryShellRadius = props.secondaryShellRadius * this.zoom;
+            const tertiaryShellRadius = props.tertiaryShellRadius * this.zoom;
+            const innerShellRadius = props.innerShellRadius * this.zoom;
+            const innerShellAlpha = props.shellFade * (0.6 + props.shimmer * 0.15);
+            const primaryShellAlpha = props.shellFade * 0.78;
+            const secondaryShellAlpha = props.shellFade * 0.42;
+            const tertiaryShellAlpha = props.shellFade * 0.24;
+
+            const glow = this.ctx.createRadialGradient(screenX, screenY, 0, screenX, screenY, glowRadius);
+            glow.addColorStop(0, `rgba(255, 245, 220, ${props.brightness * 0.55})`);
+            glow.addColorStop(0.22, `rgba(255, 190, 140, ${props.brightness * 0.4})`);
+            glow.addColorStop(0.55, `rgba(255, 120, 180, ${props.brightness * 0.2})`);
+            glow.addColorStop(1, 'rgba(200, 120, 255, 0)');
+            this.ctx.fillStyle = glow;
+            this.ctx.beginPath();
+            this.ctx.arc(screenX, screenY, glowRadius, 0, Math.PI * 2);
+            this.ctx.fill();
+
+            this.ctx.strokeStyle = `rgba(255, 170, 220, ${props.brightness * tertiaryShellAlpha})`;
+            this.ctx.lineWidth = Math.max(1, 2.5 * this.zoom * 0.12);
+            this.ctx.beginPath();
+            this.ctx.arc(screenX, screenY, tertiaryShellRadius, 0, Math.PI * 2);
+            this.ctx.stroke();
+
+            this.ctx.strokeStyle = `rgba(255, 170, 220, ${props.brightness * secondaryShellAlpha})`;
+            this.ctx.lineWidth = Math.max(1, 3 * this.zoom * 0.15);
+            this.ctx.beginPath();
+            this.ctx.arc(screenX, screenY, secondaryShellRadius, 0, Math.PI * 2);
+            this.ctx.stroke();
+
+            this.ctx.strokeStyle = `rgba(255, 205, 150, ${props.brightness * primaryShellAlpha})`;
+            this.ctx.lineWidth = Math.max(1.5, 6 * this.zoom * 0.15);
+            this.ctx.beginPath();
+            this.ctx.arc(screenX, screenY, shellRadius, 0, Math.PI * 2);
+            this.ctx.stroke();
+
+            this.ctx.strokeStyle = `rgba(255, 235, 205, ${props.brightness * innerShellAlpha})`;
+            this.ctx.lineWidth = Math.max(1, 4 * this.zoom * 0.12);
+            this.ctx.beginPath();
+            this.ctx.arc(screenX, screenY, innerShellRadius, 0, Math.PI * 2);
+            this.ctx.stroke();
+        }
+    }
+
     drawParticles() {
         for (const particle of this.particlePool.getActive()) {
             const screenX = (particle.x - this.cameraX) * this.zoom;
@@ -1350,9 +1466,9 @@ class Simulator extends SimulationCore {
 
     resetView() {
         // Center the view on the middle of the screen (where dark matter is)
+        this.zoom = this.defaultZoom;
         this.cameraX = -this.canvas.width / 2 / this.zoom;
         this.cameraY = -this.canvas.height / 2 / this.zoom;
-        this.zoom = 1;
     }
 
     createExplosion(x, y, mass, intensity = 1.0) {
@@ -1438,6 +1554,220 @@ function seedSandboxScenario(sim) {
     sim.bodies[1].vy = Math.sin(angle2) * speed2;
 }
 
+function chooseSolarResonancePeriodRatio() {
+    const roll = Math.random();
+
+    if (roll < 0.4) {
+        return 4 / 3;
+    }
+
+    if (roll < 0.75) {
+        return 3 / 2;
+    }
+
+    if (roll < 0.92) {
+        return 5 / 4;
+    }
+
+    return 2;
+}
+
+function getSolarOrbitDistances(innerOrbit, outerOrbit, planetBlueprints) {
+    const planetCount = planetBlueprints.length;
+    if (planetCount <= 1) {
+        return [innerOrbit];
+    }
+
+    const normalizedOrbitSteps = [1];
+
+    for (let i = 1; i < planetCount; i++) {
+        const baseRatio = chooseSolarResonancePeriodRatio();
+        const jitter = 0.96 + Math.random() * 0.08;
+        const nextStep = normalizedOrbitSteps[i - 1] * (baseRatio * jitter);
+        normalizedOrbitSteps.push(nextStep);
+    }
+
+    const maxStep = normalizedOrbitSteps[normalizedOrbitSteps.length - 1];
+    if (maxStep <= 1) {
+        return [innerOrbit];
+    }
+
+    const logRange = Math.log(maxStep);
+    const targetDistances = normalizedOrbitSteps.map((step) => {
+        const resonanceProgress = Math.log(step) / logRange;
+        const easedProgress = resonanceProgress <= 0 ? 0 : Math.sqrt(resonanceProgress);
+        const blendedProgress = resonanceProgress * 0.45 + easedProgress * 0.55;
+        return innerOrbit + (outerOrbit - innerOrbit) * blendedProgress;
+    });
+    const orbitDistances = [targetDistances[0]];
+
+    for (let i = 1; i < targetDistances.length; i++) {
+        const previousOrbit = orbitDistances[i - 1];
+        const previousRadius = planetBlueprints[i - 1].radius;
+        const currentRadius = planetBlueprints[i].radius;
+        const zoneProgress = i / (planetCount - 1);
+        const minGap = Math.max(18, previousRadius + currentRadius + 16 + ((1 - zoneProgress) * 20));
+        orbitDistances.push(Math.max(targetDistances[i], previousOrbit + minGap));
+    }
+
+    const overflow = orbitDistances[orbitDistances.length - 1] - outerOrbit;
+    if (overflow > 0) {
+        for (let i = 1; i < orbitDistances.length; i++) {
+            const reductionShare = i / (orbitDistances.length - 1);
+            const reducedOrbit = orbitDistances[i] - (overflow * reductionShare);
+            const previousOrbit = orbitDistances[i - 1];
+            const previousRadius = planetBlueprints[i - 1].radius;
+            const currentRadius = planetBlueprints[i].radius;
+            const zoneProgress = i / (planetCount - 1);
+            const minGap = Math.max(14, previousRadius + currentRadius + 12 + ((1 - zoneProgress) * 12));
+            orbitDistances[i] = Math.max(reducedOrbit, previousOrbit + minGap);
+        }
+    }
+
+    return orbitDistances;
+}
+
+function getSolarOrbitBodyType(orbitIndex, planetCount) {
+    const zoneProgress = planetCount <= 1 ? 0 : orbitIndex / (planetCount - 1);
+    const roll = Math.random();
+
+    if (zoneProgress < 0.35) {
+        if (roll < 0.2) {
+            return 'asteroid';
+        }
+        return 'planet';
+    }
+
+    if (zoneProgress < 0.7) {
+        if (roll < 0.15) {
+            return 'asteroid';
+        }
+        if (roll < 0.75) {
+            return 'planet';
+        }
+        return 'gas-giant';
+    }
+
+    if (roll < 0.1) {
+        return 'asteroid';
+    }
+    if (roll < 0.45) {
+        return 'planet';
+    }
+    return 'gas-giant';
+}
+
+function getSolarOrbitPhaseAngles(planetCount, orbitalDirection) {
+    const basePhase = Math.random() * Math.PI * 2;
+    const phaseStep = (Math.PI * 2) / planetCount;
+    const jitterLimit = Math.min(0.14, phaseStep * 0.12);
+    const phases = new Array(planetCount);
+    const slotOrder = [];
+    const midpoint = Math.floor(planetCount / 2);
+
+    for (let offset = 0; offset < midpoint; offset++) {
+        slotOrder.push(offset);
+        slotOrder.push(offset + midpoint);
+    }
+
+    if (planetCount % 2 !== 0) {
+        slotOrder.push(planetCount - 1);
+    }
+
+    for (let orbitIndex = 0; orbitIndex < planetCount; orbitIndex++) {
+        const slotIndex = slotOrder[orbitIndex] % planetCount;
+        const jitter = (Math.random() - 0.5) * 2 * jitterLimit;
+        phases[orbitIndex] = basePhase + (phaseStep * slotIndex * orbitalDirection) + jitter;
+    }
+
+    return phases;
+}
+
+function getSolarPlanetBlueprints(sim, planetCount) {
+    const blueprints = [];
+
+    for (let i = 0; i < planetCount; i++) {
+        const presetKey = getSolarOrbitBodyType(i, planetCount);
+        const bodyType = presetKey === 'gas-giant' ? 'gas-giant' : null;
+        const mass = sim.getRandomMassForPreset(presetKey);
+        const radius = sim.getRadiusFromMass(mass, bodyType);
+        blueprints.push({ presetKey, bodyType, mass, radius });
+    }
+
+    return blueprints;
+}
+
+function getSolarPlanetCount(innerOrbit, outerOrbit) {
+    const requestedPlanetCount = Math.floor(Math.random() * 13) + 3;
+    const orbitalSpan = Math.max(0, outerOrbit - innerOrbit);
+    const spanLimitedMax = Math.max(3, Math.min(9, Math.floor(orbitalSpan / 30)));
+    return Math.min(requestedPlanetCount, spanLimitedMax);
+}
+
+function getMaxZoomOutClusterRadius(sim) {
+    const minimumZoom = 1 / 3;
+    const maxZoomOutHalfWidth = sim.canvas.width / (2 * minimumZoom);
+    const maxZoomOutHalfHeight = sim.canvas.height / (2 * minimumZoom);
+    return Math.min(maxZoomOutHalfWidth, maxZoomOutHalfHeight) * 0.8;
+}
+
+function getGlobularClusterBlueprints(sim, starCount) {
+    const blueprints = [];
+
+    for (let i = 0; i < starCount; i++) {
+        const mass = sim.getRandomMassForPreset('star');
+        blueprints.push({
+            mass,
+            radius: sim.getRadiusFromMass(mass, 'star'),
+        });
+    }
+
+    return blueprints;
+}
+
+function getGlobularClusterPositions(clusterRadius, blueprints) {
+    const positions = [];
+
+    for (let i = 0; i < blueprints.length; i++) {
+        const radiusBias = Math.pow(Math.random(), 0.6);
+        const distance = clusterRadius * radiusBias;
+        const angle = Math.random() * Math.PI * 2;
+        positions.push({
+            x: Math.cos(angle) * distance,
+            y: Math.sin(angle) * distance,
+            distance,
+            angle,
+        });
+    }
+
+    positions.sort((a, b) => a.distance - b.distance);
+    return positions;
+}
+
+function balanceSystemMomentum(bodies) {
+    let totalMass = 0;
+    let totalMomentumX = 0;
+    let totalMomentumY = 0;
+
+    for (const body of bodies) {
+        totalMass += body.mass;
+        totalMomentumX += body.vx * body.mass;
+        totalMomentumY += body.vy * body.mass;
+    }
+
+    if (totalMass <= 0) {
+        return;
+    }
+
+    const velocityOffsetX = totalMomentumX / totalMass;
+    const velocityOffsetY = totalMomentumY / totalMass;
+
+    for (const body of bodies) {
+        body.vx -= velocityOffsetX;
+        body.vy -= velocityOffsetY;
+    }
+}
+
 function seedSolarSystemScenario(sim) {
     sim.darkMatterStrength = 0;
 
@@ -1446,31 +1776,75 @@ function seedSolarSystemScenario(sim) {
     star.vx = 0;
     star.vy = 0;
 
-    const planetCount = Math.floor(Math.random() * 5) + 1;
-    let orbitalDistance = star.radius + 60;
+    const halfViewportWidth = sim.canvas.width / (2 * sim.zoom);
+    const innerOrbit = star.radius + 18;
+    const outerOrbit = Math.max(innerOrbit + 24, halfViewportWidth * 0.75);
+    const planetCount = getSolarPlanetCount(innerOrbit, outerOrbit);
+    const orbitalDirection = Math.random() < 0.5 ? 1 : -1;
+    const planetBlueprints = getSolarPlanetBlueprints(sim, planetCount);
+    const orbitDistances = getSolarOrbitDistances(innerOrbit, outerOrbit, planetBlueprints);
+    const phaseAngles = getSolarOrbitPhaseAngles(planetCount, orbitalDirection);
+    const systemBodies = [star];
 
     for (let i = 0; i < planetCount; i++) {
-        const mass = sim.getRandomMassForPreset('random');
-        const angle = Math.random() * Math.PI * 2;
+        const blueprint = planetBlueprints[i];
+        const orbitalDistance = orbitDistances[i];
+        const angle = phaseAngles[i];
         const x = Math.cos(angle) * orbitalDistance;
         const y = Math.sin(angle) * orbitalDistance;
-        const body = sim.spawnPlanet(x, y, mass);
+        const body = sim.spawnPlanet(x, y, blueprint.mass, blueprint.bodyType);
         const orbitalSpeed = getCircularOrbitSpeed(
             star.mass,
             orbitalDistance,
             sim.gravityConstant,
             sim.massRealizationScale
         );
-        const tangentialDirection = Math.random() < 0.5 ? 1 : -1;
-        const tangentX = -Math.sin(angle) * tangentialDirection;
-        const tangentY = Math.cos(angle) * tangentialDirection;
+        const tangentX = -Math.sin(angle) * orbitalDirection;
+        const tangentY = Math.cos(angle) * orbitalDirection;
 
         body.vx = tangentX * orbitalSpeed;
         body.vy = tangentY * orbitalSpeed;
-
-        const separation = 40 + Math.random() * 40;
-        orbitalDistance += body.radius * 2 + separation;
+        systemBodies.push(body);
     }
+
+    balanceSystemMomentum(systemBodies);
+}
+
+function seedGlobularClusterScenario(sim) {
+    sim.darkMatterStrength = 0.25;
+
+    const starCount = Math.floor(Math.random() * 21) + 20;
+    const clusterRadius = getMaxZoomOutClusterRadius(sim);
+    const blueprints = getGlobularClusterBlueprints(sim, starCount);
+    const positions = getGlobularClusterPositions(clusterRadius, blueprints);
+    const totalClusterMass = blueprints.reduce((sum, blueprint) => sum + blueprint.mass, 0);
+    const tangentialDirection = Math.random() < 0.5 ? 1 : -1;
+    const systemBodies = [];
+
+    for (let i = 0; i < starCount; i++) {
+        const blueprint = blueprints[i];
+        const position = positions[i];
+        const body = sim.spawnPlanet(position.x, position.y, blueprint.mass, 'star');
+        const orbitalDistance = Math.max(position.distance, Math.max(blueprint.radius * 2, 20));
+        const circularSpeed = getCircularOrbitSpeed(
+            totalClusterMass * 0.18,
+            orbitalDistance,
+            sim.gravityConstant,
+            sim.massRealizationScale
+        );
+        const speedVariance = 0.75 + Math.random() * 0.6;
+        const radialJitter = (Math.random() - 0.5) * circularSpeed * 0.35;
+        const tangentX = -Math.sin(position.angle) * tangentialDirection;
+        const tangentY = Math.cos(position.angle) * tangentialDirection;
+        const radialX = Math.cos(position.angle);
+        const radialY = Math.sin(position.angle);
+
+        body.vx = tangentX * circularSpeed * speedVariance + radialX * radialJitter;
+        body.vy = tangentY * circularSpeed * speedVariance + radialY * radialJitter;
+        systemBodies.push(body);
+    }
+
+    balanceSystemMomentum(systemBodies);
 }
 
 function seedScenario(sim, scenarioName = 'sandbox') {
@@ -1481,6 +1855,11 @@ function seedScenario(sim, scenarioName = 'sandbox') {
 
     if (scenarioName === 'solar-system') {
         seedSolarSystemScenario(sim);
+        return;
+    }
+
+    if (scenarioName === 'globular-cluster') {
+        seedGlobularClusterScenario(sim);
         return;
     }
 
@@ -1585,6 +1964,7 @@ function bootstrapSimulatorApp(scenarioName = 'sandbox') {
 globalThis.Simulator = Simulator;
 globalThis.Body = BrowserBody;
 globalThis.AccretionBurstEffect = AccretionBurstEffect;
+globalThis.KilonovaEffect = KilonovaEffect;
 globalThis.SupernovaEffect = SupernovaEffect;
 globalThis.seedScenario = seedScenario;
 globalThis.bootstrapSimulatorApp = bootstrapSimulatorApp;
