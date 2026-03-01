@@ -6,9 +6,10 @@ if (!coreExports) {
 
 const {
     Body,
+    AccretionBurstEffect,
     SupernovaEffect,
     SimulationCore,
-    getBodyTypeConfig,
+    getSpawnClassConfig,
     getSpawnPresetDefinitions,
     getCircularOrbitSpeed,
     getBlackHoleRenderMetrics,
@@ -16,6 +17,45 @@ const {
     shouldDrawVelocityVector,
     getBodyMergeVisualState,
 } = coreExports;
+
+function getStarMassFraction(mass) {
+    const starClass = getSpawnClassConfig('star');
+    const minMass = starClass ? starClass.minMass : 10;
+    const maxMass = starClass ? starClass.maxMass : 50;
+    const massRange = Math.max(1, maxMass - minMass);
+    return Math.max(0, Math.min((mass - minMass) / massRange, 1));
+}
+
+function getStarColorChannels(mass) {
+    const massFraction = getStarMassFraction(mass);
+    let red;
+    let green;
+    let blue;
+
+    if (massFraction < 0.25) {
+        const t = massFraction / 0.25;
+        red = 255;
+        green = Math.round(100 * t);
+        blue = 0;
+    } else if (massFraction < 0.5) {
+        const t = (massFraction - 0.25) / 0.25;
+        red = 255;
+        green = Math.round(100 + 155 * t);
+        blue = 0;
+    } else if (massFraction < 0.75) {
+        const t = (massFraction - 0.5) / 0.25;
+        red = 255;
+        green = 255;
+        blue = Math.round(255 * t);
+    } else {
+        const t = (massFraction - 0.75) / 0.25;
+        red = Math.round(255 * (1 - t * 0.8));
+        green = Math.round(255 * (1 - t * 0.6));
+        blue = 255;
+    }
+
+    return { red, green, blue, massFraction };
+}
 
 class BrowserBody extends Body {
     constructor(x, y, vx, vy, mass, radius, color, bodyType = 'planet') {
@@ -54,6 +94,8 @@ class BrowserBody extends Body {
             this.ringLightness = 35 + Math.random() * 20;
         } else if (bodyType === 'star') {
             this.texture = this.generateStarTexture(radius, mass);
+        } else if (bodyType === 'white-dwarf') {
+            this.texture = this.generateWhiteDwarfTexture(radius);
         } else if (bodyType === 'asteroid') {
             this.texture = this.generateAsteroidTexture(radius);
             this.asteroidVertices = this.generateAsteroidShape(radius);
@@ -149,36 +191,7 @@ class BrowserBody extends Body {
         canvas.width = size;
         canvas.height = size;
         const ctx = canvas.getContext('2d');
-        const starConfig = getBodyTypeConfig('star');
-        const starMinMass = starConfig ? starConfig.minMass : 150;
-        const starMaxMass = starConfig ? starConfig.maxMass : 1500;
-        const massRange = Math.max(1, starMaxMass - starMinMass);
-        const massFraction = Math.max(0, Math.min((mass - starMinMass) / massRange, 1));
-        let red;
-        let green;
-        let blue;
-
-        if (massFraction < 0.25) {
-            const t = massFraction / 0.25;
-            red = 255;
-            green = Math.round(100 * t);
-            blue = 0;
-        } else if (massFraction < 0.5) {
-            const t = (massFraction - 0.25) / 0.25;
-            red = 255;
-            green = Math.round(100 + 155 * t);
-            blue = 0;
-        } else if (massFraction < 0.75) {
-            const t = (massFraction - 0.5) / 0.25;
-            red = 255;
-            green = 255;
-            blue = Math.round(255 * t);
-        } else {
-            const t = (massFraction - 0.75) / 0.25;
-            red = Math.round(255 * (1 - t * 0.8));
-            green = Math.round(255 * (1 - t * 0.6));
-            blue = 255;
-        }
+        const { red, green, blue } = getStarColorChannels(mass);
 
         const centerColor = `rgb(${red}, ${green}, ${blue})`;
         const outerColor = `rgb(${Math.round(red * 0.6)}, ${Math.round(green * 0.6)}, ${Math.round(blue * 0.6)})`;
@@ -198,6 +211,30 @@ class BrowserBody extends Body {
             ctx.arc(x, y, flareSize, 0, Math.PI * 2);
             ctx.fill();
         }
+
+        return canvas;
+    }
+
+    generateWhiteDwarfTexture(radius = this.radius) {
+        const size = Math.ceil(radius * 4);
+        const canvas = document.createElement('canvas');
+        canvas.width = size;
+        canvas.height = size;
+        const ctx = canvas.getContext('2d');
+        const center = size / 2;
+
+        const gradient = ctx.createRadialGradient(center, center, 0, center, center, center);
+        gradient.addColorStop(0, '#ffffff');
+        gradient.addColorStop(0.45, '#dbeafe');
+        gradient.addColorStop(1, '#1d4ed8');
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, 0, size, size);
+
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.arc(center, center, center * 0.55, 0, Math.PI * 2);
+        ctx.stroke();
 
         return canvas;
     }
@@ -357,11 +394,20 @@ class Simulator extends SimulationCore {
         this.fps = 60;
         this.cameraX = 0;
         this.cameraY = 0;
-        this.zoom = 1;
+        this.defaultZoom = 2;
+        this.zoom = this.defaultZoom;
         this.hoveredBody = null;
+        this.animationFrameId = null;
+        this.isDestroyed = false;
+        this.controlCleanup = null;
+        this.handleResize = () => this.resizeCanvas();
+        this.handleWheel = null;
+        this.handleCanvasClick = null;
+        this.handleMouseMove = null;
+        this.handleMouseLeave = null;
 
         this.resizeCanvas();
-        window.addEventListener('resize', () => this.resizeCanvas());
+        window.addEventListener('resize', this.handleResize);
         this.setupInputControls();
     }
 
@@ -387,24 +433,26 @@ class Simulator extends SimulationCore {
             return;
         }
 
-        this.spawnPlanet(worldX, worldY, this.getRandomMassForPreset(spawnType));
+        this.spawnPlanet(worldX, worldY, this.getRandomMassForPreset(spawnType), spawnPreset.bodyState || null);
     }
 
     setupInputControls() {
-        this.canvas.addEventListener('wheel', (e) => {
+        this.handleWheel = (e) => {
             e.preventDefault();
             const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
             this.zoom *= zoomFactor;
-            this.zoom = Math.max(0.1, Math.min(this.zoom, 10));
+            this.zoom = Math.max(1 / 3, Math.min(this.zoom, 10));
             this.cameraX = -this.canvas.width / (2 * this.zoom);
             this.cameraY = -this.canvas.height / (2 * this.zoom);
-        });
+        };
+        this.canvas.addEventListener('wheel', this.handleWheel);
 
-        this.canvas.addEventListener('click', (e) => {
+        this.handleCanvasClick = (e) => {
             this.handleClick(e);
-        });
+        };
+        this.canvas.addEventListener('click', this.handleCanvasClick);
 
-        this.canvas.addEventListener('mousemove', (e) => {
+        this.handleMouseMove = (e) => {
             const rect = this.canvas.getBoundingClientRect();
             const screenX = e.clientX - rect.left;
             const screenY = e.clientY - rect.top;
@@ -422,15 +470,57 @@ class Simulator extends SimulationCore {
                     break;
                 }
             }
-        });
+        };
+        this.canvas.addEventListener('mousemove', this.handleMouseMove);
 
-        this.canvas.addEventListener('mouseleave', () => {
+        this.handleMouseLeave = () => {
             this.hoveredBody = null;
-        });
+        };
+        this.canvas.addEventListener('mouseleave', this.handleMouseLeave);
     }
 
-    spawnPlanet(x, y, mass = null) {
-        return super.spawnPlanet(x, y, mass);
+    setControlCleanup(cleanup) {
+        this.controlCleanup = cleanup;
+    }
+
+    destroy() {
+        if (this.isDestroyed) {
+            return;
+        }
+
+        this.isDestroyed = true;
+        this.running = false;
+
+        if (this.animationFrameId !== null) {
+            cancelAnimationFrame(this.animationFrameId);
+            this.animationFrameId = null;
+        }
+
+        window.removeEventListener('resize', this.handleResize);
+
+        if (this.handleWheel) {
+            this.canvas.removeEventListener('wheel', this.handleWheel);
+        }
+        if (this.handleCanvasClick) {
+            this.canvas.removeEventListener('click', this.handleCanvasClick);
+        }
+        if (this.handleMouseMove) {
+            this.canvas.removeEventListener('mousemove', this.handleMouseMove);
+        }
+        if (this.handleMouseLeave) {
+            this.canvas.removeEventListener('mouseleave', this.handleMouseLeave);
+        }
+
+        if (typeof this.controlCleanup === 'function') {
+            this.controlCleanup();
+            this.controlCleanup = null;
+        }
+
+        this.hoveredBody = null;
+    }
+
+    spawnPlanet(x, y, mass = null, bodyType = null) {
+        return super.spawnPlanet(x, y, mass, bodyType);
     }
 
     spawnBlackHole(x, y) {
@@ -566,32 +656,12 @@ class Simulator extends SimulationCore {
 
                 this.ctx.restore();
             } else if (body.bodyType === 'star') {
-                // Calculate star color based on mass (same as texture)
-                const massRange = 1500 - 60;
-                const massFraction = Math.max(0, Math.min((body.mass - 60) / massRange, 1));
-
-                let starRed, starGreen, starBlue;
-                if (massFraction < 0.25) {
-                    const t = massFraction / 0.25;
-                    starRed = 255;
-                    starGreen = Math.round(100 * t);
-                    starBlue = 0;
-                } else if (massFraction < 0.5) {
-                    const t = (massFraction - 0.25) / 0.25;
-                    starRed = 255;
-                    starGreen = Math.round(100 + 155 * t);
-                    starBlue = 0;
-                } else if (massFraction < 0.75) {
-                    const t = (massFraction - 0.5) / 0.25;
-                    starRed = 255;
-                    starGreen = 255;
-                    starBlue = Math.round(0 + 255 * t);
-                } else {
-                    const t = (massFraction - 0.75) / 0.25;
-                    starRed = Math.round(255 * (1 - t * 0.8));
-                    starGreen = Math.round(255 * (1 - t * 0.6));
-                    starBlue = 255;
-                }
+                const {
+                    red: starRed,
+                    green: starGreen,
+                    blue: starBlue,
+                    massFraction,
+                } = getStarColorChannels(body.mass);
 
                 // Glow brightness and size increase toward blue (higher mass)
                 const glowBrightness = 0.2 + massFraction * 0.6;
@@ -636,6 +706,30 @@ class Simulator extends SimulationCore {
                 this.ctx.beginPath();
                 this.ctx.arc(screenX, screenY, screenRadius, 0, Math.PI * 2);
                 this.ctx.fill();
+            } else if (body.bodyType === 'white-dwarf') {
+                const wdGlowGradient = this.ctx.createRadialGradient(screenX, screenY, screenRadius, screenX, screenY, screenRadius * 2.4);
+                wdGlowGradient.addColorStop(0, 'rgba(219, 234, 254, 0.9)');
+                wdGlowGradient.addColorStop(0.45, 'rgba(147, 197, 253, 0.35)');
+                wdGlowGradient.addColorStop(1, 'rgba(59, 130, 246, 0)');
+                this.ctx.fillStyle = wdGlowGradient;
+                this.ctx.beginPath();
+                this.ctx.arc(screenX, screenY, screenRadius * 2.4, 0, Math.PI * 2);
+                this.ctx.fill();
+
+                if (body.texture) {
+                    this.ctx.save();
+                    this.ctx.translate(screenX, screenY);
+                    this.ctx.beginPath();
+                    this.ctx.arc(0, 0, screenRadius, 0, Math.PI * 2);
+                    this.ctx.clip();
+                    this.ctx.drawImage(body.texture, -screenRadius, -screenRadius, screenRadius * 2, screenRadius * 2);
+                    this.ctx.restore();
+                } else {
+                    this.ctx.fillStyle = '#dbeafe';
+                    this.ctx.beginPath();
+                    this.ctx.arc(screenX, screenY, screenRadius, 0, Math.PI * 2);
+                    this.ctx.fill();
+                }
             } else if (body.bodyType === 'gas-giant') {
                 // Gas giants with glow effect
                 // Draw outer glow - steeper gradient
@@ -830,6 +924,9 @@ class Simulator extends SimulationCore {
                 this.drawAccretionDisk(effect.mergedBody);
             }
         }
+
+        // Draw accretion bursts ON TOP of bodies
+        this.drawAccretionBurstEffects();
 
         // Draw supernova effects ON TOP of bodies
         this.drawSupernovaEffects();
@@ -1122,6 +1219,32 @@ class Simulator extends SimulationCore {
         }
     }
 
+    drawAccretionBurstEffects() {
+        for (const effect of this.accretionBurstEffects) {
+            const props = effect.getProperties();
+            const burstX = effect.positionLocked ? effect.lockedX : effect.x;
+            const burstY = effect.positionLocked ? effect.lockedY : effect.y;
+            const screenX = (burstX - this.cameraX) * this.zoom;
+            const screenY = (burstY - this.cameraY) * this.zoom;
+            const screenRadius = props.radius * this.zoom;
+
+            const glow = this.ctx.createRadialGradient(screenX, screenY, 0, screenX, screenY, screenRadius);
+            glow.addColorStop(0, `rgba(255, 245, 200, ${props.brightness * 0.9})`);
+            glow.addColorStop(0.4, `rgba(255, 180, 90, ${props.brightness * 0.45})`);
+            glow.addColorStop(1, 'rgba(255, 120, 40, 0)');
+            this.ctx.fillStyle = glow;
+            this.ctx.beginPath();
+            this.ctx.arc(screenX, screenY, screenRadius, 0, Math.PI * 2);
+            this.ctx.fill();
+
+            this.ctx.strokeStyle = `rgba(255, 220, 150, ${props.brightness * 0.9})`;
+            this.ctx.lineWidth = Math.max(2, props.ringWidth * this.zoom * 0.2);
+            this.ctx.beginPath();
+            this.ctx.arc(screenX, screenY, screenRadius * 0.55, 0, Math.PI * 2);
+            this.ctx.stroke();
+        }
+    }
+
     drawParticles() {
         for (const particle of this.particlePool.getActive()) {
             const screenX = (particle.x - this.cameraX) * this.zoom;
@@ -1244,6 +1367,10 @@ class Simulator extends SimulationCore {
         return super.createSupernova(x, y, radius);
     }
 
+    createAccretionBurst(x, y, body) {
+        return super.createAccretionBurst(x, y, body);
+    }
+
     clearAll() {
         return super.clearAll();
     }
@@ -1253,6 +1380,10 @@ class Simulator extends SimulationCore {
     }
 
     animate() {
+        if (this.isDestroyed) {
+            return;
+        }
+
         const now = Date.now();
         const delta = (now - this.lastTime) / 1000;
         this.lastTime = now;
@@ -1264,7 +1395,10 @@ class Simulator extends SimulationCore {
         this.draw();
         this.updateStats();
 
-        requestAnimationFrame(() => this.animate());
+        this.animationFrameId = requestAnimationFrame(() => {
+            this.animationFrameId = null;
+            this.animate();
+        });
     }
 
     updateStats() {
@@ -1321,7 +1455,12 @@ function seedSolarSystemScenario(sim) {
         const x = Math.cos(angle) * orbitalDistance;
         const y = Math.sin(angle) * orbitalDistance;
         const body = sim.spawnPlanet(x, y, mass);
-        const orbitalSpeed = getCircularOrbitSpeed(star.mass, orbitalDistance, sim.gravityConstant);
+        const orbitalSpeed = getCircularOrbitSpeed(
+            star.mass,
+            orbitalDistance,
+            sim.gravityConstant,
+            sim.massRealizationScale
+        );
         const tangentialDirection = Math.random() < 0.5 ? 1 : -1;
         const tangentX = -Math.sin(angle) * tangentialDirection;
         const tangentY = Math.cos(angle) * tangentialDirection;
@@ -1384,35 +1523,58 @@ function bootstrapSimulatorApp(scenarioName = 'sandbox') {
     const sim = new Simulator(canvas);
     seedScenario(sim, scenarioName);
 
-    document.getElementById('btn-play-pause').addEventListener('click', (e) => {
+    const playPauseButton = document.getElementById('btn-play-pause');
+    const clearButton = document.getElementById('btn-clear');
+    const resetZoomButton = document.getElementById('btn-reset-zoom');
+    const speedSlider = document.getElementById('speed-slider');
+    const gravitySlider = document.getElementById('gravity-slider');
+    const darkMatterSlider = document.getElementById('dark-matter-slider');
+
+    const handlePlayPause = (e) => {
         sim.running = !sim.running;
         e.target.textContent = sim.running ? 'Pause' : 'Play';
         e.target.classList.toggle('active');
-    });
+    };
 
-    document.getElementById('btn-clear').addEventListener('click', () => {
+    const handleClear = () => {
         sim.clearAll();
-    });
+    };
 
-    document.getElementById('btn-reset-zoom').addEventListener('click', () => {
-        sim.zoom = 1;
-        sim.cameraX = -sim.canvas.width / 2;
-        sim.cameraY = -sim.canvas.height / 2;
-    });
+    const handleResetZoom = () => {
+        sim.zoom = sim.defaultZoom;
+        sim.cameraX = -sim.canvas.width / (2 * sim.zoom);
+        sim.cameraY = -sim.canvas.height / (2 * sim.zoom);
+    };
 
-    document.getElementById('speed-slider').addEventListener('input', (e) => {
+    const handleSpeedInput = (e) => {
         sim.timeScale = parseFloat(e.target.value);
         document.getElementById('speed-value').textContent = sim.timeScale.toFixed(1) + 'x';
-    });
+    };
 
-    document.getElementById('gravity-slider').addEventListener('input', (e) => {
+    const handleGravityInput = (e) => {
         sim.gravityConstant = parseFloat(e.target.value);
         document.getElementById('gravity-value').textContent = sim.gravityConstant.toFixed(1);
-    });
+    };
 
-    document.getElementById('dark-matter-slider').addEventListener('input', (e) => {
+    const handleDarkMatterInput = (e) => {
         sim.darkMatterStrength = parseFloat(e.target.value);
         document.getElementById('dark-matter-value').textContent = sim.darkMatterStrength.toFixed(1);
+    };
+
+    playPauseButton.addEventListener('click', handlePlayPause);
+    clearButton.addEventListener('click', handleClear);
+    resetZoomButton.addEventListener('click', handleResetZoom);
+    speedSlider.addEventListener('input', handleSpeedInput);
+    gravitySlider.addEventListener('input', handleGravityInput);
+    darkMatterSlider.addEventListener('input', handleDarkMatterInput);
+
+    sim.setControlCleanup(() => {
+        playPauseButton.removeEventListener('click', handlePlayPause);
+        clearButton.removeEventListener('click', handleClear);
+        resetZoomButton.removeEventListener('click', handleResetZoom);
+        speedSlider.removeEventListener('input', handleSpeedInput);
+        gravitySlider.removeEventListener('input', handleGravityInput);
+        darkMatterSlider.removeEventListener('input', handleDarkMatterInput);
     });
 
     syncControlState(sim);
@@ -1422,6 +1584,7 @@ function bootstrapSimulatorApp(scenarioName = 'sandbox') {
 
 globalThis.Simulator = Simulator;
 globalThis.Body = BrowserBody;
+globalThis.AccretionBurstEffect = AccretionBurstEffect;
 globalThis.SupernovaEffect = SupernovaEffect;
 globalThis.seedScenario = seedScenario;
 globalThis.bootstrapSimulatorApp = bootstrapSimulatorApp;

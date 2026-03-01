@@ -2,9 +2,12 @@
 
 const {
     SimulationCore,
+    AccretionBurstEffect,
     SupernovaEffect,
-    getBodyTypeConfig,
+    getSpawnClassConfig,
     getSpawnPresetConfig,
+    getRealizedMass,
+    getEvolutionRules,
     getCircularOrbitSpeed,
     getBlackHoleRenderMetrics,
     shouldRenderBlackHoleFlares,
@@ -62,13 +65,12 @@ tests.test('getBodyType uses current production thresholds', function() {
     const sim = new SimulationCore();
 
     const cases = [
-        { mass: 3, expected: 'debris' },
-        { mass: 5, expected: 'asteroid' },
-        { mass: 20, expected: 'planet' },
-        { mass: 60, expected: 'gas-giant' },
-        { mass: 150, expected: 'star' },
-        { mass: 1500, expected: 'neutron-star' },
-        { mass: 3000, expected: 'black-hole' },
+        { mass: 0.01, expected: 'debris' },
+        { mass: 0.1, expected: 'asteroid' },
+        { mass: 1, expected: 'planet' },
+        { mass: 3, expected: 'gas-giant' },
+        { mass: 20, expected: 'star' },
+        { mass: 120, expected: 'star' },
     ];
 
     for (const testCase of cases) {
@@ -80,15 +82,19 @@ tests.test('getBodyType uses current production thresholds', function() {
 });
 
 tests.test('body type and spawn preset config share the same boundaries', function() {
-    const asteroid = getBodyTypeConfig('asteroid');
-    const planet = getBodyTypeConfig('planet');
-    const gasGiant = getBodyTypeConfig('gas-giant');
+    const asteroid = getSpawnClassConfig('asteroid');
+    const planet = getSpawnClassConfig('planet');
+    const gasGiant = getSpawnClassConfig('gas-giant');
+    const starClass = getSpawnClassConfig('star');
     const random = getSpawnPresetConfig('random');
     const star = getSpawnPresetConfig('star');
+    const evolution = getEvolutionRules();
 
-    this.assert(asteroid.minMass === 5, 'asteroid min mass should stay configurable at 5');
+    this.assert(asteroid.maxMass === 0.5, 'asteroids should stay below 0.5 Me');
     this.assert(planet.minMass === asteroid.maxMass, 'planet should start where asteroid ends');
     this.assert(gasGiant.minMass === planet.maxMass, 'gas giant should start where planet ends');
+    this.assert(starClass.minMass === gasGiant.maxMass, 'stars should start where gas giants end');
+    this.assert(starClass.maxMass === evolution.stellarCollapse.thresholdMass, 'star band should stop at collapse threshold');
     this.assert(random.minMass === asteroid.minMass, 'random preset should start at asteroid minimum');
     this.assert(random.maxMass === star.minMass, 'random preset should stop before star masses');
 });
@@ -96,24 +102,43 @@ tests.test('body type and spawn preset config share the same boundaries', functi
 tests.test('getRadiusFromMass uses compact scaling for neutron stars and black holes', function() {
     const sim = new SimulationCore();
 
-    this.assertEqual(sim.getRadiusFromMass(125), Math.cbrt(125) * 2, 0.001, 'standard body radius');
-    this.assertEqual(sim.getRadiusFromMass(1600), Math.cbrt(1600) * 0.6, 0.001, 'neutron star radius');
-    this.assertEqual(sim.getRadiusFromMass(4000), Math.cbrt(4000) * 0.8, 0.001, 'black hole radius');
+    this.assertEqual(sim.getRadiusFromMass(1, 'planet'), Math.cbrt(1) * 2.5, 0.001, 'planet radius');
+    this.assertEqual(sim.getRadiusFromMass(20, 'star'), Math.cbrt(20) * 5, 0.001, 'star radius');
+    this.assertEqual(sim.getRadiusFromMass(20, 'neutron-star'), Math.cbrt(20) * 1.2, 0.001, 'neutron star radius');
+    this.assertEqual(sim.getRadiusFromMass(20, 'black-hole'), Math.cbrt(20) * 1.6, 0.001, 'black hole radius');
 });
 
 tests.test('getCircularOrbitSpeed matches the shared gravity model', function() {
     this.assertEqual(getCircularOrbitSpeed(500, 200, 2), Math.sqrt(5), 0.001, 'orbit speed should follow sqrt(GM/r)');
+    this.assertEqual(getCircularOrbitSpeed(2, 8, 2, 25), Math.sqrt(12.5), 0.001, 'orbit speed should respect realized mass scale');
     this.assertEqual(getCircularOrbitSpeed(500, 0, 2), 0, 0.001, 'zero radius should be clamped');
+});
+
+tests.test('realized mass scales Me into simulation mass cleanly', function() {
+    this.assertEqual(getRealizedMass(2), 50, 0.001, 'default realized mass scale');
+    this.assertEqual(getRealizedMass(2, 10), 20, 0.001, 'custom realized mass scale');
 });
 
 tests.test('spawnBlackHole creates an actual black hole under current thresholds', function() {
     const sim = new SimulationCore();
+    const preset = getSpawnPresetConfig('black-hole');
 
     const body = sim.spawnBlackHole(0, 0);
 
     this.assert(sim.bodies.length === 1, 'expected one body');
     this.assert(body.bodyType === 'black-hole', `expected black-hole, got ${body.bodyType}`);
-    this.assert(body.mass >= sim.massThresholds.blackHole, 'mass should be at or above black-hole threshold');
+    this.assert(body.mass >= preset.minMass, 'black-hole preset should define the lower mass bound');
+});
+
+tests.test('explicit compact states can occupy overlapping mass ranges', function() {
+    const sim = new SimulationCore();
+    const blackHole = sim.spawnPlanet(0, 0, 20, 'black-hole');
+    const neutronStar = sim.spawnPlanet(20, 0, 20, 'neutron-star');
+    const whiteDwarf = sim.spawnPlanet(40, 0, 1, 'white-dwarf');
+
+    this.assert(blackHole.bodyType === 'black-hole', 'black hole should preserve explicit state');
+    this.assert(neutronStar.bodyType === 'neutron-star', 'neutron star should preserve explicit state');
+    this.assert(whiteDwarf.bodyType === 'white-dwarf', 'white dwarf should preserve explicit state');
 });
 
 tests.test('black-hole render metrics keep the disk outside the core', function() {
@@ -156,8 +181,8 @@ tests.test('merge visual state defaults and respects merge animation values', fu
 
 tests.test('collision creates a merged body and merge effect', function() {
     const sim = new SimulationCore();
-    const mass1 = 25;
-    const mass2 = 25;
+    const mass1 = 1;
+    const mass2 = 1;
     const radius1 = sim.getRadiusFromMass(mass1);
     const radius2 = sim.getRadiusFromMass(mass2);
 
@@ -167,13 +192,14 @@ tests.test('collision creates a merged body and merge effect', function() {
 
     this.assert(sim.bodies.length === 1, `expected one merged body, got ${sim.bodies.length}`);
     this.assert(sim.mergeEffects.length === 1, 'expected one active merge effect');
-    this.assertEqual(sim.bodies[0].mass, 50, 0.001, 'merged mass');
+    this.assertEqual(sim.bodies[0].mass, 2, 0.001, 'merged mass');
+    this.assert(sim.bodies[0].bodyType === 'gas-giant', `expected gas-giant, got ${sim.bodies[0].bodyType}`);
 });
 
 tests.test('update finishes merge cleanup after the merge duration', function() {
     const sim = new SimulationCore();
     sim.timeScale = 1;
-    const mass = 30;
+    const mass = 1;
     const radius = sim.getRadiusFromMass(mass);
 
     sim.spawnPlanet(0, 0, mass);
@@ -181,7 +207,7 @@ tests.test('update finishes merge cleanup after the merge duration', function() 
     sim.handleCollisions();
     this.assert(sim.mergeEffects.length === 1, 'merge effect should be active');
 
-    sim.update(0.6);
+    sim.update(0.3);
 
     this.assert(sim.mergeEffects.length === 0, 'merge effect should complete');
     this.assert(sim.bodies.length === 1, 'original bodies should be removed');
@@ -190,8 +216,8 @@ tests.test('update finishes merge cleanup after the merge duration', function() 
 
 tests.test('star to neutron-star transition creates one supernova effect', function() {
     const sim = new SimulationCore();
-    const mass = 800;
-    const radius = sim.getRadiusFromMass(mass);
+    const mass = 30;
+    const radius = sim.getRadiusFromMass(mass, 'star');
 
     sim.spawnPlanet(0, 0, mass);
     sim.spawnPlanet(radius * 2 - 0.5, 0, mass);
@@ -200,24 +226,64 @@ tests.test('star to neutron-star transition creates one supernova effect', funct
     this.assert(sim.supernovaEffects.length === 1, `expected one supernova effect, got ${sim.supernovaEffects.length}`);
     this.assert(sim.bodies[0].bodyType === 'neutron-star', `expected neutron-star, got ${sim.bodies[0].bodyType}`);
     this.assert(sim.bodies[0].supernovaTime > 0, 'merged body should be marked as in supernova');
+    this.assert(sim.bodies[0].supernovaProfile === 'core-collapse', 'neutron star should retain the core-collapse profile');
+});
+
+tests.test('extreme star mergers collapse directly into black holes', function() {
+    const sim = new SimulationCore();
+    const mass = 50;
+    const radius = sim.getRadiusFromMass(mass, 'star');
+
+    sim.spawnPlanet(0, 0, mass);
+    sim.spawnPlanet(radius * 2 - 0.5, 0, mass);
+    sim.handleCollisions();
+
+    this.assert(sim.bodies[0].bodyType === 'black-hole', `expected black-hole, got ${sim.bodies[0].bodyType}`);
+    this.assert(sim.supernovaEffects.length === 1, 'extreme stellar collapse should still create a supernova effect');
+    this.assert(sim.bodies[0].supernovaProfile === 'hypernova', 'black hole collapse should use the hypernova profile');
+});
+
+tests.test('star merging into a black hole creates an accretion burst instead of a supernova', function() {
+    const sim = new SimulationCore();
+    const starMass = 30;
+    const blackHoleMass = 20;
+    const radius = sim.getRadiusFromMass(blackHoleMass, 'black-hole');
+
+    sim.spawnPlanet(0, 0, starMass);
+    sim.spawnPlanet(radius * 0.1, 0, blackHoleMass, 'black-hole');
+    sim.handleCollisions();
+
+    this.assert(sim.bodies[0].bodyType === 'black-hole', `expected black-hole, got ${sim.bodies[0].bodyType}`);
+    this.assert(sim.supernovaEffects.length === 0, 'black-hole consumption should not create a supernova');
+    this.assert(sim.accretionBurstEffects.length === 1, 'black-hole consumption should create an accretion burst');
+    this.assert(sim.bodies[0].supernovaProfile === 'accretion-burst', 'merged black hole should track the burst profile');
 });
 
 tests.test('supernova effect transitions into phase 4 and completes cleanly', function() {
-    const effect = new SupernovaEffect(0, 0, null, 15);
+    const effect = new SupernovaEffect(0, 0, null, 7.5);
 
-    effect.time = 1;
-    this.assert(effect.getProperties().phase === 1, 't=1 should be phase 1');
-    effect.time = 3.5;
-    this.assert(effect.getProperties().phase === 3, 't=3.5 should be phase 3');
-    effect.time = 10;
-    this.assert(effect.getProperties().phase === 4, 't=10 should be phase 4');
-    effect.time = 15;
+    effect.time = 0.5;
+    this.assert(effect.getProperties().phase === 1, 't=0.5 should be phase 1');
+    effect.time = 1.75;
+    this.assert(effect.getProperties().phase === 3, 't=1.75 should be phase 3');
+    effect.time = 5;
+    this.assert(effect.getProperties().phase === 4, 't=5 should be phase 4');
+    effect.time = 7.5;
     this.assert(effect.isDone(), 'effect should be done at duration');
+});
+
+tests.test('accretion burst effect completes cleanly', function() {
+    const effect = new AccretionBurstEffect(0, 0, null, 1.5);
+
+    effect.time = 0.5;
+    this.assert(effect.getProperties().brightness > 0, 'accretion burst should still be visible mid-effect');
+    effect.time = 1.5;
+    this.assert(effect.isDone(), 'accretion burst should complete at its duration');
 });
 
 tests.test('dark matter origin case keeps acceleration finite', function() {
     const sim = new SimulationCore();
-    const body = sim.spawnPlanet(0, 0, 25);
+    const body = sim.spawnPlanet(0, 0, 1);
     body.vx = 0;
     body.vy = 0;
 
@@ -229,7 +295,7 @@ tests.test('dark matter origin case keeps acceleration finite', function() {
 
 tests.test('anchored bodies stay fixed under force and update', function() {
     const sim = new SimulationCore();
-    const body = sim.spawnPlanet(0, 0, 200);
+    const body = sim.spawnPlanet(0, 0, 12);
     body.isAnchored = true;
     body.vx = 12;
     body.vy = -8;
@@ -254,7 +320,7 @@ tests.test('createExplosion populates the particle pool', function() {
 tests.test('clearAll resets bodies and transient effects', function() {
     const sim = new SimulationCore();
 
-    sim.spawnPlanet(0, 0, 25);
+    sim.spawnPlanet(0, 0, 1);
     sim.createExplosion(0, 0, 50, 1);
     sim.supernovaEffects.push(new SupernovaEffect(0, 0, null, 1));
     sim.mergeEffects.push({ placeholder: true });
@@ -264,6 +330,7 @@ tests.test('clearAll resets bodies and transient effects', function() {
     this.assert(sim.bodies.length === 0, 'bodies should be cleared');
     this.assert(sim.particlePool.getActive().length === 0, 'particles should be cleared');
     this.assert(sim.supernovaEffects.length === 0, 'supernova effects should be cleared');
+    this.assert(sim.accretionBurstEffects.length === 0, 'accretion bursts should be cleared');
     this.assert(sim.mergeEffects.length === 0, 'merge effects should be cleared');
 });
 

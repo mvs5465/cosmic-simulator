@@ -59,6 +59,7 @@ const {
 tests.test('runtime exports are available', function() {
     this.assert(typeof Simulator === 'function', 'Simulator should be defined');
     this.assert(typeof Body === 'function', 'Body should be defined');
+    this.assert(typeof AccretionBurstEffect === 'function', 'AccretionBurstEffect should be defined');
     this.assert(typeof SupernovaEffect === 'function', 'SupernovaEffect should be defined');
     this.assert(typeof seedScenario === 'function', 'seedScenario should be defined');
     this.assert(typeof bootstrapSimulatorApp === 'function', 'bootstrapSimulatorApp should be defined');
@@ -75,11 +76,23 @@ tests.test('standalone simulator can be constructed without control markup', fun
     canvas.height = 600;
 
     const sim = new Simulator(canvas);
-    sim.spawnPlanet(0, 0, 25);
+    sim.spawnPlanet(0, 0, 1);
 
     this.assert(sim.bodies.length === 1, 'one body should be spawned');
     this.assert(sim.bodies[0].bodyType === 'planet', `expected planet, got ${sim.bodies[0].bodyType}`);
     this.assert(sim.bodies[0].texture, 'browser body should have a texture');
+});
+
+tests.test('standalone simulator can be destroyed cleanly', function() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 800;
+    canvas.height = 600;
+
+    const sim = new Simulator(canvas);
+    sim.destroy();
+
+    this.assert(sim.isDestroyed === true, 'simulator should be marked destroyed');
+    this.assert(sim.animationFrameId === null, 'destroy should clear the pending animation frame');
 });
 
 tests.test('star merge creates a neutron star and a supernova effect', function() {
@@ -88,8 +101,8 @@ tests.test('star merge creates a neutron star and a supernova effect', function(
     canvas.height = 600;
 
     const sim = new Simulator(canvas);
-    const mass = 800;
-    const radius = sim.getRadiusFromMass(mass);
+    const mass = 30;
+    const radius = sim.getRadiusFromMass(mass, 'star');
     sim.spawnPlanet(0, 0, mass);
     sim.spawnPlanet(radius * 2 - 0.5, 0, mass);
 
@@ -100,14 +113,33 @@ tests.test('star merge creates a neutron star and a supernova effect', function(
     this.assert(sim.supernovaEffects.length === 1, 'expected one supernova effect');
 });
 
+tests.test('star merging into a black hole creates an accretion burst instead of a supernova', function() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 800;
+    canvas.height = 600;
+
+    const sim = new Simulator(canvas);
+    const blackHoleMass = 20;
+    const radius = sim.getRadiusFromMass(blackHoleMass, 'black-hole');
+    sim.spawnPlanet(0, 0, 30);
+    sim.spawnPlanet(radius * 0.1, 0, blackHoleMass, 'black-hole');
+
+    sim.handleCollisions();
+
+    this.assert(sim.bodies.length === 1, 'collision should produce one merged body');
+    this.assert(sim.bodies[0].bodyType === 'black-hole', `expected black-hole, got ${sim.bodies[0].bodyType}`);
+    this.assert(sim.supernovaEffects.length === 0, 'black-hole consumption should not create a supernova');
+    this.assert(sim.accretionBurstEffects.length === 1, 'black-hole consumption should create an accretion burst');
+});
+
 tests.test('draw runs without throwing for a minimal scene', function() {
     const canvas = document.createElement('canvas');
     canvas.width = 800;
     canvas.height = 600;
 
     const sim = new Simulator(canvas);
-    sim.spawnPlanet(-100, 0, 25);
-    sim.spawnPlanet(100, 0, 60);
+    sim.spawnPlanet(-100, 0, 1);
+    sim.spawnPlanet(100, 0, 4);
     sim.draw();
 
     this.assert(true, 'draw completed');
@@ -132,6 +164,7 @@ tests.test('spawn presets expose the menu options from shared config', function(
         'planet',
         'gas-giant',
         'star',
+        'white-dwarf',
         'neutron-star',
         'black-hole',
         'supermassive-black-hole',
@@ -141,6 +174,29 @@ tests.test('spawn presets expose the menu options from shared config', function(
         JSON.stringify(presetKeys) === JSON.stringify(expectedKeys),
         `expected shared preset keys ${expectedKeys.join(', ')}, got ${presetKeys.join(', ')}`
     );
+});
+
+tests.test('click spawning respects explicit compact-object presets', function() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 800;
+    canvas.height = 600;
+    canvas.getBoundingClientRect = () => ({ left: 0, top: 0 });
+
+    const select = document.createElement('select');
+    select.id = 'spawn-type';
+    const option = document.createElement('option');
+    option.value = 'white-dwarf';
+    option.selected = true;
+    select.appendChild(option);
+    document.body.appendChild(select);
+
+    const sim = new Simulator(canvas);
+    sim.handleClick({ clientX: 400, clientY: 300 });
+
+    document.body.removeChild(select);
+
+    this.assert(sim.bodies.length === 1, 'click spawning should create one body');
+    this.assert(sim.bodies[0].bodyType === 'white-dwarf', `expected white-dwarf, got ${sim.bodies[0].bodyType}`);
 });
 
 tests.test('solar-system scenario seeds a central star and orbiting planets', function() {
@@ -170,7 +226,12 @@ tests.test('solar-system scenario seeds a central star and orbiting planets', fu
 
         const distance = Math.hypot(body.x, body.y);
         const radialDotVelocity = body.x * body.vx + body.y * body.vy;
-        const expectedSpeed = getCircularOrbitSpeedForTest(star.mass, distance, sim.gravityConstant);
+        const expectedSpeed = getCircularOrbitSpeedForTest(
+            star.mass,
+            distance,
+            sim.gravityConstant,
+            sim.massRealizationScale
+        );
         const actualSpeed = Math.hypot(body.vx, body.vy);
 
         this.assert(distance > star.radius, `expected planet outside star radius, got distance ${distance}`);
@@ -186,10 +247,10 @@ tests.test('black-hole merge keeps flare detail visible on the merged body durin
     canvas.height = 600;
 
     const sim = new Simulator(canvas);
-    const mass = 1100000;
-    const radius = sim.getRadiusFromMass(mass);
-    sim.spawnPlanet(0, 0, mass);
-    sim.spawnPlanet(radius * 0.2, 0, mass);
+    const mass = 12000;
+    const radius = sim.getRadiusFromMass(mass, 'black-hole');
+    sim.spawnPlanet(0, 0, mass, 'black-hole');
+    sim.spawnPlanet(radius * 0.2, 0, mass, 'black-hole');
 
     sim.handleCollisions();
 
@@ -246,7 +307,7 @@ tests.test('black-hole merge overlay draws the center core during the active mer
 
     sim.drawAccretionDisk(body);
 
-    const metrics = getBlackHoleRenderMetricsForTest(body.radius * body.mergeScale);
+    const metrics = getBlackHoleRenderMetricsForTest(body.radius * sim.zoom * body.mergeScale);
     const hasCoreRadius = arcRadii.some((radius) => Math.abs(radius - metrics.coreRadius) < 0.001);
     const hasDiskRadius = arcRadii.some((radius) => Math.abs(radius - metrics.diskOuterRadius) < 0.001);
 
@@ -261,7 +322,7 @@ tests.test('large black holes still use the same texture render path when textur
 
     const sim = new Simulator(canvas);
     sim.zoom = 2;
-    sim.spawnPlanet(0, 0, 2200000);
+    sim.spawnPlanet(0, 0, 50000, 'black-hole');
     const body = sim.bodies[0];
 
     this.assert(body.bodyType === 'black-hole', `expected black-hole, got ${body.bodyType}`);
