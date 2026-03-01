@@ -1851,7 +1851,22 @@ document.getElementById('dark-matter-slider').addEventListener('input', (e) => {
 });
 
 document.getElementById('zoom-slider').addEventListener('input', (e) => {
-    sim.zoom = parseFloat(e.target.value);
+    const newZoom = parseFloat(e.target.value);
+    const oldZoom = sim.zoom;
+
+    // Calculate center of viewport in world coordinates
+    const centerScreenX = sim.canvas.width / 2;
+    const centerScreenY = sim.canvas.height / 2;
+    const centerWorldX = (centerScreenX / oldZoom) + sim.cameraX;
+    const centerWorldY = (centerScreenY / oldZoom) + sim.cameraY;
+
+    // Update zoom
+    sim.zoom = newZoom;
+
+    // Adjust camera so center stays at same world position
+    sim.cameraX = centerWorldX - (centerScreenX / newZoom);
+    sim.cameraY = centerWorldY - (centerScreenY / newZoom);
+
     document.getElementById('zoom-value').textContent = sim.zoom.toFixed(1) + 'x';
 });
 
