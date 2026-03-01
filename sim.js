@@ -29,6 +29,7 @@ class Body {
         this.ringHueShift = 0; // For gas giant ring color variation
         this.ringLightness = 50; // For gas giant ring brightness variation
         this.asteroidVertices = null; // For asteroid shapes
+        this.blackHoleFlares = null; // Cached flare positions for black holes (for performance)
 
         if (bodyType === 'planet') {
             this.texture = this.generateEarthTexture(radius);
@@ -57,7 +58,22 @@ class Body {
             this.texture = this.generateNeutronStarTexture(radius);
         } else if (bodyType === 'black-hole') {
             this.texture = this.generateBlackHoleTexture(radius);
+            this.blackHoleFlares = this.generateBlackHoleFlares(radius);
         }
+    }
+
+    generateBlackHoleFlares(radius) {
+        // Generate flare positions once per black hole, cache them for consistent rendering
+        const flareCount = Math.max(4, Math.ceil(radius / 10));
+        const flares = [];
+        for (let i = 0; i < flareCount; i++) {
+            flares.push({
+                angle: Math.random() * Math.PI * 2,
+                distance: 0.25 + Math.random() * 0.25, // Normalized to radius
+                sizeBase: 0.02 + Math.random() * 0.04 // Normalized to radius
+            });
+        }
+        return flares;
     }
 
     generateEarthTexture(radius = this.radius) {
@@ -648,6 +664,7 @@ class Simulator {
         this.cameraX = 0; // Will be set properly after canvas resize
         this.cameraY = 0;
         this.zoom = 1;
+        this.hoveredBody = null; // Track which body is being hovered
 
         // Dark matter attractor at origin (invisible)
         this.darkMatterX = 0;
@@ -735,21 +752,62 @@ class Simulator {
             case 'black-hole':
                 this.spawnPlanet(worldX, worldY, Math.random() * 3000 + 3000);
                 break;
+            case 'supermassive-black-hole':
+                this.spawnPlanet(worldX, worldY, Math.random() * 200000 + 900000);
+                break;
         }
     }
 
     setupInputControls() {
-        // Scroll wheel zoom
+        // Scroll wheel zoom (centered on dark matter at origin 0,0)
         this.canvas.addEventListener('wheel', (e) => {
             e.preventDefault();
             const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
             this.zoom *= zoomFactor;
             this.zoom = Math.max(0.1, Math.min(this.zoom, 10)); // Clamp zoom 0.1 to 10
+
+            // Keep dark matter (0, 0) centered on screen by adjusting camera
+            // screenCenter = cameraPos + viewport_size / (2 * zoom)
+            // We want screenCenter = (0, 0), so:
+            // cameraPos = -viewport_size / (2 * zoom)
+            this.cameraX = -this.canvas.width / (2 * this.zoom);
+            this.cameraY = -this.canvas.height / (2 * this.zoom);
         });
 
         // Click to spawn (use regular click event on canvas)
         this.canvas.addEventListener('click', (e) => {
             this.handleClick(e);
+        });
+
+        // Mouse move for hover detection
+        this.canvas.addEventListener('mousemove', (e) => {
+            const rect = this.canvas.getBoundingClientRect();
+            const screenX = e.clientX - rect.left;
+            const screenY = e.clientY - rect.top;
+
+            // Convert to world coordinates
+            const worldX = (screenX / this.zoom) + this.cameraX;
+            const worldY = (screenY / this.zoom) + this.cameraY;
+
+            // Check if hovering over any body
+            this.hoveredBody = null;
+            for (const body of this.bodies) {
+                const dx = body.x - worldX;
+                const dy = body.y - worldY;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+
+                // Use collision radius for hover detection
+                const hoverRadius = body.bodyType === 'black-hole' ? body.radius * 0.12 : body.radius;
+                if (dist < hoverRadius) {
+                    this.hoveredBody = body;
+                    break; // Return first body found
+                }
+            }
+        });
+
+        // Clear hover when mouse leaves canvas
+        this.canvas.addEventListener('mouseleave', () => {
+            this.hoveredBody = null;
         });
     }
 
@@ -760,10 +818,18 @@ class Simulator {
         const radius = this.getRadiusFromMass(mass);
         const bodyType = this.getBodyType(mass);
 
-        const angle = Math.random() * Math.PI * 2;
+        // Calculate radial direction from dark matter (origin) to spawn point
+        const radialAngle = Math.atan2(y, x);
+
+        // Bias velocity to be tangential (perpendicular to radial direction)
+        // Randomly choose to orbit clockwise or counterclockwise
+        const orbitalDirection = Math.random() < 0.5 ? Math.PI / 2 : -Math.PI / 2;
+        const variance = (Math.random() - 0.5) * 0.4; // ±0.2 radians of variance
+        const velocityAngle = radialAngle + orbitalDirection + variance;
+
         const speed = Math.random() * 15 + 5; // Random momentum 5-20
-        const vx = Math.cos(angle) * speed;
-        const vy = Math.sin(angle) * speed;
+        const vx = Math.cos(velocityAngle) * speed;
+        const vy = Math.sin(velocityAngle) * speed;
 
         const body = new Body(x, y, vx, vy, mass, radius, '#ffffff', bodyType);
         this.bodies.push(body);
@@ -979,6 +1045,7 @@ class Simulator {
                     } else if (newBodyType === 'black-hole') {
                         console.log(`[BLACK HOLE] Merged BH: mass=${totalMass.toFixed(0)}, radius=${newRadius.toFixed(2)}`);
                         mergedBody.texture = mergedBody.generateBlackHoleTexture(newRadius);
+                        mergedBody.blackHoleFlares = mergedBody.generateBlackHoleFlares(newRadius);
                     }
 
                     // Add merged body to bodies array
@@ -1333,8 +1400,12 @@ class Simulator {
                 this.ctx.arc(screenX, screenY, screenRadius, 0, Math.PI * 2);
                 this.ctx.fill();
             } else if (body.bodyType === 'black-hole') {
-                // Black holes with rotating accretion disk
-                if (body.texture) {
+                // Black holes: use procedural rendering for large ones to avoid pixelation
+                if (screenRadius > 100) {
+                    // Draw procedurally for large black holes
+                    this.drawProceduralBlackHole(screenX, screenY, screenRadius, body.pulseTime, body);
+                } else if (body.texture) {
+                    // Use texture for small black holes
                     this.ctx.save();
                     this.ctx.translate(screenX, screenY);
                     // Rotate the accretion disk
@@ -1413,6 +1484,65 @@ class Simulator {
 
         // Draw supernova particles ON TOP of everything
         this.drawParticles();
+
+        // Draw hover mass tooltip ON TOP of everything
+        if (this.hoveredBody) {
+            this.drawHoverTooltip(this.hoveredBody);
+        }
+    }
+
+    drawProceduralBlackHole(screenX, screenY, screenRadius, pulseTime, body) {
+        // Draw black hole procedurally at render time to avoid pixelation on large objects
+        this.ctx.save();
+        this.ctx.translate(screenX, screenY);
+        this.ctx.rotate(pulseTime * 2);
+
+        // Dark center first
+        this.ctx.fillStyle = '#000000';
+        this.ctx.beginPath();
+        this.ctx.arc(0, 0, screenRadius, 0, Math.PI * 2);
+        this.ctx.fill();
+
+        // Accretion disk as ring
+        const innerDiskRadius = screenRadius * 0.25;
+        const outerDiskRadius = screenRadius * 0.5;
+
+        // Create ring clipping region
+        this.ctx.beginPath();
+        this.ctx.arc(0, 0, outerDiskRadius, 0, Math.PI * 2);
+        this.ctx.arc(0, 0, innerDiskRadius, 0, Math.PI * 2, true);
+        this.ctx.clip();
+
+        // Draw disk gradient
+        const diskGradient = this.ctx.createRadialGradient(0, 0, innerDiskRadius, 0, 0, outerDiskRadius);
+        diskGradient.addColorStop(0, 'rgba(255, 200, 100, 0.9)');
+        diskGradient.addColorStop(0.3, 'rgba(255, 150, 80, 0.8)');
+        diskGradient.addColorStop(0.6, 'rgba(255, 100, 50, 0.5)');
+        diskGradient.addColorStop(1, 'rgba(200, 50, 0, 0)');
+
+        this.ctx.fillStyle = diskGradient;
+        this.ctx.beginPath();
+        this.ctx.arc(0, 0, outerDiskRadius, 0, Math.PI * 2);
+        this.ctx.fill();
+
+        // Draw cached flares if available
+        if (body && body.blackHoleFlares) {
+            for (const flare of body.blackHoleFlares) {
+                const x = Math.cos(flare.angle) * flare.distance * screenRadius;
+                const y = Math.sin(flare.angle) * flare.distance * screenRadius;
+                const flareSize = flare.sizeBase * screenRadius;
+
+                const flareGradient = this.ctx.createRadialGradient(x, y, 0, x, y, flareSize);
+                flareGradient.addColorStop(0, 'rgba(255, 255, 200, 0.8)');
+                flareGradient.addColorStop(1, 'rgba(255, 150, 50, 0)');
+                this.ctx.fillStyle = flareGradient;
+                this.ctx.beginPath();
+                this.ctx.arc(x, y, flareSize, 0, Math.PI * 2);
+                this.ctx.fill();
+            }
+        }
+
+        this.ctx.restore();
     }
 
     drawAccretionDisk(x, y, radius, pulseTime) {
@@ -1655,6 +1785,61 @@ class Simulator {
         }
     }
 
+    drawHoverTooltip(body) {
+        // Convert body world position to screen position
+        const screenX = (body.x - this.cameraX) * this.zoom;
+        const screenY = (body.y - this.cameraY) * this.zoom;
+
+        // Format mass with appropriate precision
+        const massText = body.mass.toFixed(1);
+        const text = `Mass: ${massText}`;
+
+        // Setup text rendering
+        this.ctx.font = '14px "Courier New", monospace';
+        this.ctx.textAlign = 'center';
+        this.ctx.textBaseline = 'bottom';
+
+        // Measure text to create background
+        const metrics = this.ctx.measureText(text);
+        const textWidth = metrics.width;
+        const textHeight = 18;
+        const padding = 8;
+
+        // Calculate tooltip position (above the body, centered)
+        const tooltipX = screenX;
+        const tooltipY = screenY - 30; // Offset above the body
+
+        // Draw semi-transparent background with rounded corners
+        const x = tooltipX - textWidth / 2 - padding;
+        const y = tooltipY - textHeight - padding;
+        const w = textWidth + padding * 2;
+        const h = textHeight + padding;
+        const r = 4;
+
+        this.ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+        this.ctx.beginPath();
+        this.ctx.moveTo(x + r, y);
+        this.ctx.lineTo(x + w - r, y);
+        this.ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+        this.ctx.lineTo(x + w, y + h - r);
+        this.ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+        this.ctx.lineTo(x + r, y + h);
+        this.ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+        this.ctx.lineTo(x, y + r);
+        this.ctx.quadraticCurveTo(x, y, x + r, y);
+        this.ctx.closePath();
+        this.ctx.fill();
+
+        // Draw border
+        this.ctx.strokeStyle = 'rgba(124, 58, 237, 0.8)';
+        this.ctx.lineWidth = 1;
+        this.ctx.stroke();
+
+        // Draw text
+        this.ctx.fillStyle = '#7c3aed';
+        this.ctx.fillText(text, tooltipX, tooltipY);
+    }
+
     drawGrid() {
         const gridSize = 200;
         const startX = Math.floor(this.cameraX / gridSize) * gridSize;
@@ -1834,6 +2019,12 @@ document.getElementById('btn-clear').addEventListener('click', () => {
     sim.clearAll();
 });
 
+document.getElementById('btn-reset-zoom').addEventListener('click', () => {
+    sim.zoom = 1;
+    sim.cameraX = -sim.canvas.width / 2;
+    sim.cameraY = -sim.canvas.height / 2;
+});
+
 // Sliders
 document.getElementById('speed-slider').addEventListener('input', (e) => {
     sim.timeScale = parseFloat(e.target.value);
@@ -1848,26 +2039,6 @@ document.getElementById('gravity-slider').addEventListener('input', (e) => {
 document.getElementById('dark-matter-slider').addEventListener('input', (e) => {
     sim.darkMatterStrength = parseFloat(e.target.value);
     document.getElementById('dark-matter-value').textContent = sim.darkMatterStrength.toFixed(1);
-});
-
-document.getElementById('zoom-slider').addEventListener('input', (e) => {
-    const newZoom = parseFloat(e.target.value);
-    const oldZoom = sim.zoom;
-
-    // Calculate center of viewport in world coordinates
-    const centerScreenX = sim.canvas.width / 2;
-    const centerScreenY = sim.canvas.height / 2;
-    const centerWorldX = (centerScreenX / oldZoom) + sim.cameraX;
-    const centerWorldY = (centerScreenY / oldZoom) + sim.cameraY;
-
-    // Update zoom
-    sim.zoom = newZoom;
-
-    // Adjust camera so center stays at same world position
-    sim.cameraX = centerWorldX - (centerScreenX / newZoom);
-    sim.cameraY = centerWorldY - (centerScreenY / newZoom);
-
-    document.getElementById('zoom-value').textContent = sim.zoom.toFixed(1) + 'x';
 });
 
 // Start the animation loop
