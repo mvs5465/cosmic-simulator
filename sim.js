@@ -1735,18 +1735,22 @@ class Simulator {
 const canvas = document.getElementById('canvas');
 const sim = new Simulator(canvas);
 
-// Spawn static test bodies for sprite inspection
-sim.spawnPlanet(-300, 0, 150); // Star
-sim.bodies[0].vx = 0;
-sim.bodies[0].vy = 0;
+// Spawn two random objects below stellar mass with random velocities
+const mass1 = Math.random() * 145 + 5; // 5-150 (below star threshold)
+const mass2 = Math.random() * 145 + 5;
+sim.spawnPlanet(-200, -150, mass1);
+sim.spawnPlanet(200, 150, mass2);
 
-sim.spawnPlanet(0, 0, 80); // Gas giant
-sim.bodies[1].vx = 0;
-sim.bodies[1].vy = 0;
+// Give them random velocities
+const angle1 = Math.random() * Math.PI * 2;
+const speed1 = Math.random() * 30 + 20;
+sim.bodies[0].vx = Math.cos(angle1) * speed1;
+sim.bodies[0].vy = Math.sin(angle1) * speed1;
 
-sim.spawnPlanet(300, 0, 180); // Large star
-sim.bodies[2].vx = 0;
-sim.bodies[2].vy = 0;
+const angle2 = Math.random() * Math.PI * 2;
+const speed2 = Math.random() * 30 + 20;
+sim.bodies[1].vx = Math.cos(angle2) * speed2;
+sim.bodies[1].vy = Math.sin(angle2) * speed2;
 
 
 // Spawn dropdown - spawns immediately on selection change
