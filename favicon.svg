@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <!-- Background -->
+  <rect width="100" height="100" fill="#0a0e27"/>
+
+  <!-- Star field -->
+  <circle cx="15" cy="20" r="1.5" fill="#ffffff" opacity="0.6"/>
+  <circle cx="80" cy="15" r="1" fill="#ffffff" opacity="0.5"/>
+  <circle cx="85" cy="75" r="1.2" fill="#ffffff" opacity="0.7"/>
+  <circle cx="10" cy="85" r="0.8" fill="#ffffff" opacity="0.4"/>
+
+  <!-- Planet glow -->
+  <defs>
+    <radialGradient id="glow" cx="40%" cy="40%">
+      <stop offset="0%" style="stop-color:#64d9ff;stop-opacity:0.8" />
+      <stop offset="40%" style="stop-color:#1a9ccf;stop-opacity:0.4" />
+      <stop offset="100%" style="stop-color:#0a1f3a;stop-opacity:0" />
+    </radialGradient>
+    <radialGradient id="planet" cx="35%" cy="35%">
+      <stop offset="0%" style="stop-color:#1a5490" />
+      <stop offset="50%" style="stop-color:#0d3a6b" />
+      <stop offset="100%" style="stop-color:#051c2a" />
+    </radialGradient>
+    <radialGradient id="shine" cx="30%" cy="30%">
+      <stop offset="0%" style="stop-color:#ffffff;stop-opacity:0.6" />
+      <stop offset="60%" style="stop-color:#ffffff;stop-opacity:0" />
+    </radialGradient>
+  </defs>
+
+  <!-- Glow layer -->
+  <circle cx="50" cy="50" r="32" fill="url(#glow)"/>
+
+  <!-- Planet body -->
+  <circle cx="50" cy="50" r="28" fill="url(#planet)"/>
+
+  <!-- Continents -->
+  <ellipse cx="42" cy="45" rx="8" ry="6" fill="#2d6b3f" opacity="0.7"/>
+  <ellipse cx="58" cy="52" rx="6" ry="5" fill="#2d6b3f" opacity="0.6"/>
+
+  <!-- Cloud wisps -->
+  <ellipse cx="50" cy="40" rx="10" ry="3" fill="#ffffff" opacity="0.3"/>
+
+  <!-- Shine/highlight -->
+  <circle cx="50" cy="50" r="28" fill="url(#shine)"/>
+</svg>
