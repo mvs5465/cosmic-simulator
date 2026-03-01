@@ -10,6 +10,29 @@
             neutronStarProfile: 'core-collapse',
             blackHoleProfile: 'hypernova',
         }),
+        redGiant: Object.freeze({
+            lowerMass: 12,
+            upperMass: 24,
+            spawnChance: 0.28,
+        }),
+        wolfRayet: Object.freeze({
+            lowerMass: 38,
+            upperMass: 50,
+            blackHoleThresholdMass: 44,
+            lifetimeMin: 10,
+            lifetimeMax: 20,
+            neutronStarMassRetention: 0.42,
+            blackHoleMassRetention: 0.68,
+        }),
+        stellarSpawn: Object.freeze({
+            lowMassWeight: 0.58,
+            midMassWeight: 0.27,
+            highMassWeight: 0.11,
+            wolfRayetWeight: 0.04,
+            lowMassUpper: 18,
+            midMassUpper: 30,
+            highMassUpper: 38,
+        }),
         whiteDwarf: Object.freeze({
             lowerMass: 0.6,
             upperMass: 1.4,
@@ -110,6 +133,24 @@
             isCompact: false,
         }),
         Object.freeze({
+            key: 'red-giant',
+            label: 'Red Giant',
+            radiusScale: 8.5,
+            collisionRadiusMultiplier: 1.15,
+            mergeDuration: 0.3,
+            emitsExplosionOnMerge: true,
+            isCompact: false,
+        }),
+        Object.freeze({
+            key: 'wolf-rayet',
+            label: 'Wolf-Rayet',
+            radiusScale: 5.8,
+            collisionRadiusMultiplier: 1,
+            mergeDuration: 0.25,
+            emitsExplosionOnMerge: true,
+            isCompact: false,
+        }),
+        Object.freeze({
             key: 'white-dwarf',
             label: 'White Dwarf',
             radiusScale: 2.2,
@@ -181,12 +222,28 @@
             menuOrder: 4,
         }),
         Object.freeze({
+            key: 'red-giant',
+            label: BODY_STATE_CONFIG_BY_KEY['red-giant'].label,
+            minMass: EVOLUTION_RULES.redGiant.lowerMass,
+            maxMass: EVOLUTION_RULES.redGiant.upperMass,
+            bodyState: 'red-giant',
+            menuOrder: 5,
+        }),
+        Object.freeze({
+            key: 'wolf-rayet',
+            label: BODY_STATE_CONFIG_BY_KEY['wolf-rayet'].label,
+            minMass: EVOLUTION_RULES.wolfRayet.lowerMass,
+            maxMass: EVOLUTION_RULES.wolfRayet.upperMass,
+            bodyState: 'wolf-rayet',
+            menuOrder: 6,
+        }),
+        Object.freeze({
             key: 'white-dwarf',
             label: BODY_STATE_CONFIG_BY_KEY['white-dwarf'].label,
             minMass: EVOLUTION_RULES.whiteDwarf.lowerMass,
             maxMass: EVOLUTION_RULES.whiteDwarf.upperMass,
             bodyState: 'white-dwarf',
-            menuOrder: 5,
+            menuOrder: 7,
         }),
         Object.freeze({
             key: 'neutron-star',
@@ -194,7 +251,7 @@
             minMass: EVOLUTION_RULES.neutronStar.lowerMass,
             maxMass: EVOLUTION_RULES.neutronStar.upperMass,
             bodyState: 'neutron-star',
-            menuOrder: 6,
+            menuOrder: 8,
         }),
         Object.freeze({
             key: 'black-hole',
@@ -202,7 +259,7 @@
             minMass: EVOLUTION_RULES.blackHole.lowerMass,
             maxMass: 120,
             bodyState: 'black-hole',
-            menuOrder: 7,
+            menuOrder: 9,
         }),
         Object.freeze({
             key: 'supermassive-black-hole',
@@ -210,7 +267,7 @@
             minMass: 8000,
             maxMass: 20000,
             bodyState: 'black-hole',
-            menuOrder: 8,
+            menuOrder: 10,
         }),
     ]);
     const SPAWN_PRESET_CONFIG_BY_KEY = Object.freeze(Object.fromEntries(
@@ -263,10 +320,47 @@
         return minMass + Math.random() * (maxMass - minMass);
     }
 
+    function getRandomStellarMass() {
+        const starClass = SPAWN_CLASS_CONFIG_BY_KEY.star;
+        const spawn = EVOLUTION_RULES.stellarSpawn;
+        const roll = Math.random();
+        let minMass = starClass.minMass;
+        let maxMass = spawn.lowMassUpper;
+        let skew = 1.4;
+        let threshold = spawn.lowMassWeight;
+
+        if (roll >= threshold) {
+            minMass = spawn.lowMassUpper;
+            maxMass = spawn.midMassUpper;
+            skew = 1.25;
+            threshold += spawn.midMassWeight;
+        }
+
+        if (roll >= threshold) {
+            minMass = spawn.midMassUpper;
+            maxMass = spawn.highMassUpper;
+            skew = 1.1;
+            threshold += spawn.highMassWeight;
+        }
+
+        if (roll >= threshold) {
+            minMass = EVOLUTION_RULES.wolfRayet.lowerMass;
+            maxMass = SPAWN_CLASS_CONFIG_BY_KEY.star.maxMass;
+            skew = 1;
+        }
+
+        const localRoll = Math.pow(Math.random(), skew);
+        return minMass + localRoll * (maxMass - minMass);
+    }
+
     function getRandomMassForPreset(presetKey) {
         const preset = SPAWN_PRESET_CONFIG_BY_KEY[presetKey];
         if (!preset) {
             throw new Error(`Unknown spawn preset: ${presetKey}`);
+        }
+
+        if (presetKey === 'star') {
+            return getRandomStellarMass();
         }
 
         return getRandomMassInRange(preset.minMass, preset.maxMass);
@@ -285,7 +379,31 @@
     function getNaturalBodyStateForMass(mass) {
         const spawnClass = getSpawnClassForMass(mass);
         const definition = SPAWN_CLASS_CONFIG_BY_KEY[spawnClass];
-        return definition ? definition.defaultState : 'planet';
+        if (!definition) {
+            return 'planet';
+        }
+
+        if (definition.key === 'star' && mass >= EVOLUTION_RULES.wolfRayet.lowerMass) {
+            return 'wolf-rayet';
+        }
+
+        return definition.defaultState;
+    }
+
+    function getRandomStellarStateForMass(mass) {
+        if (mass >= EVOLUTION_RULES.wolfRayet.lowerMass) {
+            return 'wolf-rayet';
+        }
+
+        if (
+            mass >= EVOLUTION_RULES.redGiant.lowerMass &&
+            mass <= EVOLUTION_RULES.redGiant.upperMass &&
+            Math.random() < EVOLUTION_RULES.redGiant.spawnChance
+        ) {
+            return 'red-giant';
+        }
+
+        return 'star';
     }
 
     function resolveCollapsedRemnantState(mass) {
@@ -346,13 +464,7 @@
     }
 
     function shouldDrawVelocityVector(body, threshold = 10) {
-        if (!body || body.bodyType === 'black-hole') {
-            return false;
-        }
-
-        const vx = body.vx ?? 0;
-        const vy = body.vy ?? 0;
-        return Math.hypot(vx, vy) > threshold;
+        return false;
     }
 
     function getBodyMergeVisualState(body) {
@@ -382,6 +494,9 @@
             this.rotationSpeed = (Math.random() - 0.5) * 0.15;
             this.pulseTime = 0;
             this.supernovaTime = 0;
+            this.lifetimeRemaining = null;
+            this.maxLifetime = null;
+            this.instabilityProgress = 0;
             this.isAnchored = false;
             this.maxTrailPoints = 24;
             this.trailMinSegmentLength = Math.max(2, radius * 0.4);
@@ -521,7 +636,7 @@
     }
 
     class SupernovaEffect {
-        constructor(x, y, body = null, duration = 7.5) {
+        constructor(x, y, body = null, duration = 7.5, displayRadius = null) {
             this.x = x;
             this.y = y;
             this.body = body;
@@ -530,6 +645,7 @@
             this.explosionX = x;
             this.explosionY = y;
             this.explosionLocked = false;
+            this.displayRadius = displayRadius;
 
             this.phase1Duration = 1.0;
             this.phase2Duration = 0.25;
@@ -810,6 +926,7 @@
                 planet: SPAWN_CLASS_CONFIG_BY_KEY.planet.minMass,
                 gasGiant: SPAWN_CLASS_CONFIG_BY_KEY['gas-giant'].minMass,
                 star: SPAWN_CLASS_CONFIG_BY_KEY.star.minMass,
+                wolfRayet: EVOLUTION_RULES.wolfRayet.lowerMass,
                 neutronStar: EVOLUTION_RULES.stellarCollapse.thresholdMass,
                 blackHole: EVOLUTION_RULES.stellarCollapse.blackHoleThresholdMass,
             };
@@ -869,17 +986,83 @@
                     return resolveCollapsedRemnantState(totalMass);
                 }
                 if (totalMass >= SPAWN_CLASS_CONFIG_BY_KEY.star.minMass) {
-                    return 'star';
+                    return this.getBodyStateForMass(totalMass);
                 }
                 return 'white-dwarf';
             }
 
             const naturalState = this.getBodyStateForMass(totalMass);
-            if (naturalState === 'star' && totalMass >= EVOLUTION_RULES.stellarCollapse.thresholdMass) {
+            if ((naturalState === 'star' || naturalState === 'wolf-rayet') &&
+                totalMass >= EVOLUTION_RULES.stellarCollapse.thresholdMass) {
                 return resolveCollapsedRemnantState(totalMass);
             }
 
             return naturalState;
+        }
+
+        initializeBodyEvolution(body) {
+            if (!body) {
+                return;
+            }
+
+            body.instabilityProgress = 0;
+
+            if (body.bodyType === 'wolf-rayet') {
+                body.evolutionStage = 'unstable';
+                body.maxLifetime = EVOLUTION_RULES.wolfRayet.lifetimeMin +
+                    Math.random() * (EVOLUTION_RULES.wolfRayet.lifetimeMax - EVOLUTION_RULES.wolfRayet.lifetimeMin);
+                body.lifetimeRemaining = body.maxLifetime;
+                return;
+            }
+
+            body.lifetimeRemaining = null;
+            body.maxLifetime = null;
+
+            if (body.bodyType === 'red-giant') {
+                body.evolutionStage = 'expanded';
+            } else if (body.evolutionStage === 'unstable' || body.evolutionStage === 'expanded') {
+                body.evolutionStage = 'stable';
+            }
+        }
+
+        collapseWolfRayet(body) {
+            if (!body || body.bodyType !== 'wolf-rayet' || body.supernovaTime > 0) {
+                return;
+            }
+
+            const originalRadius = body.radius;
+            const becomesBlackHole = body.mass >= EVOLUTION_RULES.wolfRayet.blackHoleThresholdMass;
+            const remnantState = becomesBlackHole ? 'black-hole' : 'neutron-star';
+            const retention = becomesBlackHole ?
+                EVOLUTION_RULES.wolfRayet.blackHoleMassRetention :
+                EVOLUTION_RULES.wolfRayet.neutronStarMassRetention;
+
+            let remnantMass = body.mass * retention;
+            if (remnantState === 'black-hole') {
+                remnantMass = Math.max(EVOLUTION_RULES.blackHole.lowerMass, remnantMass);
+            } else {
+                remnantMass = Math.max(
+                    EVOLUTION_RULES.neutronStar.lowerMass,
+                    Math.min(EVOLUTION_RULES.neutronStar.upperMass, remnantMass)
+                );
+            }
+
+            body.mass = remnantMass;
+            body.radius = this.getRadiusFromMass(remnantMass, remnantState);
+            body.trailMinSegmentLength = Math.max(2, body.radius * 0.4);
+            if (typeof body.setState === 'function') {
+                body.setState(remnantState);
+            } else {
+                body.bodyType = remnantState;
+                body.state = remnantState;
+            }
+            body.spawnClass = this.getSpawnClassForMass(remnantMass);
+            body.supernovaProfile = getSupernovaProfileForState(remnantState);
+            body.evolutionStage = 'collapsing';
+            body.lifetimeRemaining = null;
+            body.maxLifetime = null;
+            body.instabilityProgress = 1;
+            this.createSupernovaWithBody(body.x, body.y, originalRadius, body, originalRadius);
         }
 
         spawnPlanet(x, y, mass = null, bodyType = null) {
@@ -901,15 +1084,22 @@
             const vy = Math.sin(velocityAngle) * speed;
 
             const body = this.createBody(x, y, vx, vy, mass, radius, '#ffffff', resolvedBodyType);
-            if (typeof body.setState === 'function') {
+            if (typeof body.setState === 'function' && body.bodyType !== resolvedBodyType) {
                 body.setState(resolvedBodyType);
-            } else {
+            } else if (body.bodyType !== resolvedBodyType) {
                 body.bodyType = resolvedBodyType;
                 body.state = resolvedBodyType;
             }
             body.spawnClass = spawnClass;
+            this.initializeBodyEvolution(body);
             this.bodies.push(body);
             return body;
+        }
+
+        spawnStellarBody(x, y, mass = null, allowEvolvedStates = true) {
+            const resolvedMass = mass === null ? this.getRandomMassForPreset('star') : mass;
+            const bodyState = allowEvolvedStates ? getRandomStellarStateForMass(resolvedMass) : 'star';
+            return this.spawnPlanet(x, y, resolvedMass, bodyState);
         }
 
         spawnBlackHole(x, y) {
@@ -931,6 +1121,7 @@
 
                 const body = this.createBody(px, py, vx, vy, mass, radius, '#ffffff', bodyType);
                 body.spawnClass = this.getSpawnClassForMass(mass);
+                this.initializeBodyEvolution(body);
                 this.bodies.push(body);
             }
         }
@@ -981,6 +1172,31 @@
             for (const body of this.bodies) {
                 if (body.isMerging) continue;
                 body.update(dt);
+            }
+
+            const collapsingBodies = [];
+            for (const body of this.bodies) {
+                if (body.isMerging || body.supernovaTime > 0 || body.bodyType !== 'wolf-rayet') {
+                    continue;
+                }
+
+                if (body.lifetimeRemaining === null || body.maxLifetime === null) {
+                    this.initializeBodyEvolution(body);
+                }
+
+                body.lifetimeRemaining -= dt;
+                body.instabilityProgress = Math.max(
+                    0,
+                    Math.min(1, 1 - (body.lifetimeRemaining / Math.max(body.maxLifetime || 1, 0.0001)))
+                );
+
+                if (body.lifetimeRemaining <= 0) {
+                    collapsingBodies.push(body);
+                }
+            }
+
+            for (const body of collapsingBodies) {
+                this.collapseWolfRayet(body);
             }
 
             this.handleCollisions();
@@ -1085,7 +1301,7 @@
                     }
 
                     const mergedBody = this.createBody(newX, newY, newVx, newVy, totalMass, newRadius, '#fff', newBodyType);
-                    if (typeof mergedBody.setState === 'function') {
+                    if (typeof mergedBody.setState === 'function' && mergedBody.bodyType !== newBodyType) {
                         mergedBody.setState(newBodyType);
                     }
                     mergedBody.spawnClass = this.getSpawnClassForMass(totalMass);
@@ -1093,6 +1309,7 @@
                     mergedBody.mergeScale = 0;
                     mergedBody.mergeAlpha = 0;
                     mergedBody.isAnchored = Boolean(anchoredBody);
+                    this.initializeBodyEvolution(mergedBody);
                     this.bodies.push(mergedBody);
 
                     const newBodyConfig = BODY_STATE_CONFIG_BY_KEY[newBodyType] || BODY_STATE_CONFIG_BY_KEY.planet;
@@ -1108,7 +1325,9 @@
                     const b1IsBlackHole = b1.bodyType === 'black-hole';
                     const b2IsBlackHole = b2.bodyType === 'black-hole';
                     const involvesBlackHole = mergedStates.includes('black-hole');
-                    const involvesStar = mergedStates.includes('star');
+                    const involvesStar = mergedStates.some((state) =>
+                        state === 'star' || state === 'red-giant' || state === 'wolf-rayet'
+                    );
                     const isBlackHoleConsumption = b1IsBlackHole !== b2IsBlackHole;
                     const isNeutronStarMerger = b1.bodyType === 'neutron-star' && b2.bodyType === 'neutron-star';
 
@@ -1154,8 +1373,8 @@
             }
         }
 
-        createSupernovaWithBody(x, y, radius, body) {
-            this.supernovaEffects.push(new SupernovaEffect(x, y, body, 7.5));
+        createSupernovaWithBody(x, y, radius, body, displayRadius = null) {
+            this.supernovaEffects.push(new SupernovaEffect(x, y, body, 7.5, displayRadius ?? radius));
             this.createExplosion(x, y, 50, 2.5);
         }
 
@@ -1203,6 +1422,7 @@
         getSpawnClassConfig,
         getSpawnClassForMass,
         getNaturalBodyStateForMass,
+        getRandomStellarStateForMass,
         resolveCollapsedRemnantState,
         getSupernovaProfileForState,
         getRealizedMass,
@@ -1211,6 +1431,7 @@
         getSpawnPresetDefinitions,
         getSpawnPresetConfig,
         getRandomMassInRange,
+        getRandomStellarMass,
         getRandomMassForPreset,
         getCircularOrbitSpeed,
         getBlackHoleRenderMetrics,

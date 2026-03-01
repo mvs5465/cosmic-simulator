@@ -15,6 +15,8 @@ const {
     shouldRenderBlackHoleFlares,
     shouldDrawVelocityVector,
     getBodyMergeVisualState,
+    getRandomStellarStateForMass,
+    getRandomStellarMass,
 } = require('./sim-core.js');
 
 class TestRunner {
@@ -86,7 +88,8 @@ tests.test('getBodyType uses current production thresholds', function() {
         { mass: 1, expected: 'planet' },
         { mass: 3, expected: 'gas-giant' },
         { mass: 20, expected: 'star' },
-        { mass: 120, expected: 'star' },
+        { mass: 45, expected: 'wolf-rayet' },
+        { mass: 120, expected: 'wolf-rayet' },
     ];
 
     for (const testCase of cases) {
@@ -151,10 +154,56 @@ tests.test('explicit compact states can occupy overlapping mass ranges', functio
     const blackHole = sim.spawnPlanet(0, 0, 20, 'black-hole');
     const neutronStar = sim.spawnPlanet(20, 0, 20, 'neutron-star');
     const whiteDwarf = sim.spawnPlanet(40, 0, 1, 'white-dwarf');
+    const redGiant = sim.spawnPlanet(60, 0, 18, 'red-giant');
+    const wolfRayet = sim.spawnPlanet(80, 0, 42, 'wolf-rayet');
 
     this.assert(blackHole.bodyType === 'black-hole', 'black hole should preserve explicit state');
     this.assert(neutronStar.bodyType === 'neutron-star', 'neutron star should preserve explicit state');
     this.assert(whiteDwarf.bodyType === 'white-dwarf', 'white dwarf should preserve explicit state');
+    this.assert(redGiant.bodyType === 'red-giant', 'red giant should preserve explicit state');
+    this.assert(wolfRayet.bodyType === 'wolf-rayet', 'wolf-rayet should preserve explicit state');
+});
+
+tests.test('random stellar spawn state can branch into red giants and wolf-rayet stars', function() {
+    const originalRandom = Math.random;
+    Math.random = () => 0.1;
+
+    try {
+        this.assert(getRandomStellarStateForMass(18) === 'red-giant', 'eligible lower-mass stars should be able to spawn as red giants');
+        this.assert(getRandomStellarStateForMass(42) === 'wolf-rayet', 'upper stellar masses should spawn as wolf-rayet stars');
+        this.assert(getRandomStellarStateForMass(28) === 'star', 'mid-band stars should remain ordinary stars');
+    } finally {
+        Math.random = originalRandom;
+    }
+});
+
+tests.test('star preset mass generation is weighted toward lower-mass stars', function() {
+    const originalRandom = Math.random;
+
+    try {
+        let sequence = [0.1, 0];
+        Math.random = () => sequence.shift();
+        const lowMass = getRandomStellarMass();
+
+        sequence = [0.6, 0.5];
+        Math.random = () => sequence.shift();
+        const midMass = getRandomStellarMass();
+
+        sequence = [0.86, 0.5];
+        Math.random = () => sequence.shift();
+        const highMass = getRandomStellarMass();
+
+        sequence = [0.97, 0.5];
+        Math.random = () => sequence.shift();
+        const wolfMass = getRandomStellarMass();
+
+        this.assert(lowMass >= 10 && lowMass < 18, `expected low-mass star band, got ${lowMass}`);
+        this.assert(midMass >= 18 && midMass < 30, `expected mid-mass star band, got ${midMass}`);
+        this.assert(highMass >= 30 && highMass < 38, `expected high-mass star band, got ${highMass}`);
+        this.assert(wolfMass >= 38 && wolfMass <= 50, `expected wolf-rayet star band, got ${wolfMass}`);
+    } finally {
+        Math.random = originalRandom;
+    }
 });
 
 tests.test('black-hole render metrics keep the disk outside the core', function() {
@@ -181,7 +230,7 @@ tests.test('velocity vectors are not drawn for black holes', function() {
     const fastPlanet = { bodyType: 'planet', vx: 20, vy: 0 };
     const fastBlackHole = { bodyType: 'black-hole', vx: 20, vy: 0 };
 
-    this.assert(shouldDrawVelocityVector(fastPlanet), 'fast non-black-hole bodies should draw vectors');
+    this.assert(!shouldDrawVelocityVector(fastPlanet), 'velocity vectors should be disabled for all bodies');
     this.assert(!shouldDrawVelocityVector(fastBlackHole), 'black holes should not draw vectors');
 });
 
@@ -243,6 +292,20 @@ tests.test('star to neutron-star transition creates one supernova effect', funct
     this.assert(sim.bodies[0].bodyType === 'neutron-star', `expected neutron-star, got ${sim.bodies[0].bodyType}`);
     this.assert(sim.bodies[0].supernovaTime > 0, 'merged body should be marked as in supernova');
     this.assert(sim.bodies[0].supernovaProfile === 'core-collapse', 'neutron star should retain the core-collapse profile');
+});
+
+tests.test('wolf-rayet stars auto-collapse after their lifetime expires', function() {
+    const sim = new SimulationCore();
+    const wolfRayet = sim.spawnPlanet(0, 0, 42, 'wolf-rayet');
+    wolfRayet.lifetimeRemaining = 0.05;
+    wolfRayet.maxLifetime = 10;
+
+    sim.update(0.1);
+
+    this.assert(sim.supernovaEffects.length === 1, 'expected one supernova effect from wolf-rayet collapse');
+    this.assert(sim.bodies[0].bodyType === 'neutron-star', `expected neutron-star remnant, got ${sim.bodies[0].bodyType}`);
+    this.assert(sim.bodies[0].supernovaProfile === 'core-collapse', 'lower-mass wolf-rayet stars should collapse to neutron stars');
+    this.assert(sim.supernovaEffects[0].displayRadius > sim.bodies[0].radius, 'supernova should preserve the larger pre-collapse stellar radius');
 });
 
 tests.test('extreme star mergers collapse directly into black holes', function() {

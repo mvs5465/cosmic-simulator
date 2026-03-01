@@ -277,7 +277,8 @@
             <h1 class="launch-title">Cosmic<br>Simulator</h1>
             <p class="launch-copy">
                 Start from a curated setup instead of dropping directly into the sandbox.
-                Pick the freeform sandbox, start with a generated solar system, or drop into a chaotic globular cluster.
+                Pick the freeform sandbox, start with a generated solar system, drop into a chaotic globular cluster,
+                or orbit a violent galactic core.
             </p>
 
             <div class="scenario-grid">
@@ -309,6 +310,16 @@
                         The cluster extends beyond the default view, but fits inside the fully zoomed-out frame.
                     </p>
                     <button data-scenario="globular-cluster">Launch Globular Cluster</button>
+                </article>
+
+                <article class="scenario-card">
+                    <div class="scenario-label">Violent Scenario</div>
+                    <h2 class="scenario-name">Galaxy Core</h2>
+                    <p class="scenario-description">
+                        Centers the system on a supermassive black hole, then seeds a dense orbital disk of stars,
+                        compact remnants, and smaller black holes around it.
+                    </p>
+                    <button data-scenario="galaxy-core">Launch Galaxy Core</button>
                 </article>
             </div>
 
@@ -431,6 +442,17 @@
                 regenerateButton.textContent = 'Regenerate Cluster';
                 regenerateButton.addEventListener('click', () => {
                     startScenario('globular-cluster');
+                });
+                scenarioControls.appendChild(regenerateButton);
+                return;
+            }
+
+            if (scenarioName === 'galaxy-core') {
+                const regenerateButton = document.createElement('button');
+                regenerateButton.id = 'btn-regenerate-scenario';
+                regenerateButton.textContent = 'Regenerate Core';
+                regenerateButton.addEventListener('click', () => {
+                    startScenario('galaxy-core');
                 });
                 scenarioControls.appendChild(regenerateButton);
             }

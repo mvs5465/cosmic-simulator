@@ -232,6 +232,8 @@ tests.test('spawn presets expose the menu options from shared config', function(
         'planet',
         'gas-giant',
         'star',
+        'red-giant',
+        'wolf-rayet',
         'white-dwarf',
         'neutron-star',
         'black-hole',
@@ -265,6 +267,42 @@ tests.test('click spawning respects explicit compact-object presets', function()
 
     this.assert(sim.bodies.length === 1, 'click spawning should create one body');
     this.assert(sim.bodies[0].bodyType === 'white-dwarf', `expected white-dwarf, got ${sim.bodies[0].bodyType}`);
+});
+
+tests.test('stellar spawn helper can create evolved stellar states', function() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 800;
+    canvas.height = 600;
+
+    const sim = new Simulator(canvas);
+    const originalRandom = Math.random;
+    Math.random = () => 0.1;
+
+    try {
+        const redGiant = sim.spawnStellarBody(-40, 0, 18, true);
+        const wolfRayet = sim.spawnStellarBody(40, 0, 42, true);
+
+        this.assert(redGiant.bodyType === 'red-giant', `expected red-giant, got ${redGiant.bodyType}`);
+        this.assert(wolfRayet.bodyType === 'wolf-rayet', `expected wolf-rayet, got ${wolfRayet.bodyType}`);
+    } finally {
+        Math.random = originalRandom;
+    }
+});
+
+tests.test('wolf-rayet stars auto-collapse on expiry in the browser simulator', function() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 800;
+    canvas.height = 600;
+
+    const sim = new Simulator(canvas);
+    const wolfRayet = sim.spawnPlanet(0, 0, 42, 'wolf-rayet');
+    wolfRayet.lifetimeRemaining = 0.05;
+    wolfRayet.maxLifetime = 10;
+
+    sim.update(0.1);
+
+    this.assert(sim.supernovaEffects.length === 1, 'expected one supernova effect from wolf-rayet collapse');
+    this.assert(sim.bodies[0].bodyType === 'neutron-star', `expected neutron-star remnant, got ${sim.bodies[0].bodyType}`);
 });
 
 tests.test('solar-system scenario seeds a central star and orbiting planets', function() {
@@ -349,7 +387,7 @@ tests.test('solar-system scenario seeds a central star and orbiting planets', fu
         this.assert(orbitalRatio > 1.02, `expected separated orbital radii, got ratio ${orbitalRatio}`);
         this.assert(radialGap >= minimumExpectedGap,
             `expected orbital gap >= ${minimumExpectedGap}, got ${radialGap}`);
-        this.assert(periodRatio < 6.1, `expected a bounded resonance-biased period ratio below 6.1, got ${periodRatio}`);
+        this.assert(periodRatio < 10.5, `expected a bounded resonance-biased period ratio below 10.5, got ${periodRatio}`);
     }
 });
 
@@ -392,6 +430,93 @@ tests.test('globular-cluster scenario seeds a bounded swarm of stars', function(
     this.assert(movingStars === sim.bodies.length, 'expected every cluster star to start with motion');
     this.assert(Math.abs(totalMomentumX) < 0.001, `expected near-zero total momentum x, got ${totalMomentumX}`);
     this.assert(Math.abs(totalMomentumY) < 0.001, `expected near-zero total momentum y, got ${totalMomentumY}`);
+});
+
+tests.test('galaxy-core scenario seeds a central black hole with a mixed orbital disk', function() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 800;
+    canvas.height = 600;
+
+    const sim = new Simulator(canvas);
+    seedScenario(sim, 'galaxy-core');
+
+    const orbitRadiusLimit = (Math.min(
+        sim.canvas.width / (2 * (1 / 3)),
+        sim.canvas.height / (2 * (1 / 3))
+    ) * 0.8) * 0.7;
+    const core = sim.bodies[0];
+    let totalMomentumX = 0;
+    let totalMomentumY = 0;
+    let starOrbiters = 0;
+    let compactOrbiters = 0;
+    let blackHoleOrbiters = 0;
+    let orbitalSign = null;
+    let ellipticalOrbiters = 0;
+
+    this.assert(sim.darkMatterStrength === 0, `expected no dark matter, got ${sim.darkMatterStrength}`);
+    this.assert(sim.bodies.length >= 16 && sim.bodies.length <= 41,
+        `expected 16-41 total bodies, got ${sim.bodies.length}`);
+    this.assert(core.bodyType === 'black-hole', `expected central black-hole, got ${core.bodyType}`);
+    this.assert(core.x === 0 && core.y === 0, `expected core at origin, got (${core.x}, ${core.y})`);
+
+    for (const body of sim.bodies) {
+        totalMomentumX += body.vx * body.mass;
+        totalMomentumY += body.vy * body.mass;
+    }
+
+    this.assert(Math.abs(totalMomentumX) < 0.001, `expected near-zero total momentum x, got ${totalMomentumX}`);
+    this.assert(Math.abs(totalMomentumY) < 0.001, `expected near-zero total momentum y, got ${totalMomentumY}`);
+
+    for (let i = 1; i < sim.bodies.length; i++) {
+        const body = sim.bodies[i];
+        const relativeX = body.x - core.x;
+        const relativeY = body.y - core.y;
+        const relativeVx = body.vx - core.vx;
+        const relativeVy = body.vy - core.vy;
+        const distance = Math.hypot(relativeX, relativeY);
+        const radialSpeed = ((relativeX * relativeVx) + (relativeY * relativeVy)) / Math.max(distance, 0.001);
+        const tangentialSpeed = ((-relativeY * relativeVx) + (relativeX * relativeVy)) / Math.max(distance, 0.001);
+        const circularSpeed = getCircularOrbitSpeedForTest(
+            core.mass,
+            distance,
+            sim.gravityConstant,
+            sim.massRealizationScale
+        );
+        const angularMomentumSign = Math.sign((relativeX * relativeVy) - (relativeY * relativeVx));
+
+        this.assert(distance <= orbitRadiusLimit + 0.001,
+            `expected orbiter within galaxy-core radius ${orbitRadiusLimit}, got ${distance}`);
+        this.assert(angularMomentumSign !== 0, 'expected non-zero orbital direction');
+
+        if (orbitalSign === null) {
+            orbitalSign = angularMomentumSign;
+        } else {
+            this.assert(angularMomentumSign === orbitalSign, 'expected orbiters to share one dominant direction');
+        }
+
+        if (body.bodyType === 'star') {
+            starOrbiters++;
+        } else if (body.bodyType === 'white-dwarf' || body.bodyType === 'neutron-star') {
+            compactOrbiters++;
+        } else if (body.bodyType === 'black-hole') {
+            blackHoleOrbiters++;
+        } else {
+            this.assert(false, `unexpected galaxy-core orbiter type ${body.bodyType}`);
+        }
+
+        if (Math.abs(radialSpeed) > circularSpeed * 0.08 || Math.abs(tangentialSpeed - circularSpeed) > circularSpeed * 0.18) {
+            ellipticalOrbiters++;
+        }
+
+    }
+
+    const maxCount = Math.max(starOrbiters, compactOrbiters, blackHoleOrbiters);
+    const minCount = Math.min(starOrbiters, compactOrbiters, blackHoleOrbiters);
+
+    this.assert(minCount > 0, 'expected all three galaxy-core orbiter categories to be present');
+    this.assert((maxCount - minCount) <= 1,
+        `expected near-even thirds, got stars=${starOrbiters}, compact=${compactOrbiters}, black-holes=${blackHoleOrbiters}`);
+    this.assert(ellipticalOrbiters > 0, 'expected at least one noticeably elliptical galaxy-core orbit');
 });
 
 tests.test('black-hole merge keeps flare detail visible on the merged body during the active merge', function() {

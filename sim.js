@@ -76,11 +76,32 @@ class BrowserBody extends Body {
         this.asteroidVertices = null;
         this.blackHoleFlares = null;
         this.craters = null;
+        this.compactGlowPhase = Math.random() * Math.PI * 2;
+        this.compactFieldTilt = Math.random() * Math.PI * 2;
+        this.compactHaloScale = 0.85 + Math.random() * 0.35;
+        this.compactSparkleOffsets = Array.from({ length: 4 }, () => Math.random() * Math.PI * 2);
+        this.applyVisualState(bodyType);
+    }
+
+    setState(nextState) {
+        if (this.bodyType === nextState && this.state === nextState) {
+            return;
+        }
+
+        super.setState(nextState);
+        this.applyVisualState(nextState);
+    }
+
+    applyVisualState(bodyType = this.bodyType) {
+        this.texture = null;
+        this.asteroidVertices = null;
+        this.blackHoleFlares = null;
+        this.craters = null;
 
         if (bodyType === 'planet') {
-            this.texture = this.generateEarthTexture(radius);
+            this.texture = this.generateEarthTexture(this.radius);
         } else if (bodyType === 'gas-giant') {
-            this.texture = this.generateGasGiantTexture(radius);
+            this.texture = this.generateGasGiantTexture(this.radius);
             this.ringScale = 0.5 + Math.random() * 1.0;
             this.ringCount = Math.floor(Math.random() * 5) + 1;
             this.ringOpacities = [];
@@ -94,12 +115,16 @@ class BrowserBody extends Body {
             this.ringHueShift = Math.random() * 40 - 20;
             this.ringLightness = 35 + Math.random() * 20;
         } else if (bodyType === 'star') {
-            this.texture = this.generateStarTexture(radius, mass);
+            this.texture = this.generateStarTexture(this.radius, this.mass);
+        } else if (bodyType === 'red-giant') {
+            this.texture = this.generateRedGiantTexture(this.radius);
+        } else if (bodyType === 'wolf-rayet') {
+            this.texture = this.generateWolfRayetTexture(this.radius, this.mass);
         } else if (bodyType === 'white-dwarf') {
-            this.texture = this.generateWhiteDwarfTexture(radius);
+            this.texture = this.generateWhiteDwarfTexture(this.radius);
         } else if (bodyType === 'asteroid') {
-            this.texture = this.generateAsteroidTexture(radius);
-            this.asteroidVertices = this.generateAsteroidShape(radius);
+            this.texture = this.generateAsteroidTexture(this.radius);
+            this.asteroidVertices = this.generateAsteroidShape(this.radius);
             this.craters = Array.from({ length: 2 }, () => {
                 const angle = Math.random() * Math.PI * 2;
                 const distance = 0.4 + Math.random() * 0.3;
@@ -107,10 +132,10 @@ class BrowserBody extends Body {
                 return { angle, distance, size };
             });
         } else if (bodyType === 'neutron-star') {
-            this.texture = this.generateNeutronStarTexture(radius);
+            this.texture = this.generateNeutronStarTexture(this.radius);
         } else if (bodyType === 'black-hole') {
-            this.texture = this.generateBlackHoleTexture(radius);
-            this.blackHoleFlares = this.generateBlackHoleFlares(radius);
+            this.texture = this.generateBlackHoleTexture(this.radius);
+            this.blackHoleFlares = this.generateBlackHoleFlares(this.radius);
         }
     }
 
@@ -216,7 +241,7 @@ class BrowserBody extends Body {
         return canvas;
     }
 
-    generateWhiteDwarfTexture(radius = this.radius) {
+    generateRedGiantTexture(radius = this.radius) {
         const size = Math.ceil(radius * 4);
         const canvas = document.createElement('canvas');
         canvas.width = size;
@@ -225,16 +250,107 @@ class BrowserBody extends Body {
         const center = size / 2;
 
         const gradient = ctx.createRadialGradient(center, center, 0, center, center, center);
-        gradient.addColorStop(0, '#ffffff');
-        gradient.addColorStop(0.45, '#dbeafe');
-        gradient.addColorStop(1, '#1d4ed8');
+        gradient.addColorStop(0, 'rgba(255, 245, 220, 1)');
+        gradient.addColorStop(0.18, 'rgba(255, 215, 170, 0.98)');
+        gradient.addColorStop(0.42, 'rgba(255, 140, 80, 0.7)');
+        gradient.addColorStop(0.7, 'rgba(220, 80, 60, 0.32)');
+        gradient.addColorStop(0.9, 'rgba(170, 45, 35, 0.1)');
+        gradient.addColorStop(1, 'rgba(110, 25, 20, 0)');
         ctx.fillStyle = gradient;
         ctx.fillRect(0, 0, size, size);
 
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
-        ctx.lineWidth = 1;
+        for (let i = 0; i < 5; i++) {
+            ctx.strokeStyle = `rgba(255, ${140 + i * 12}, ${80 - i * 6}, ${0.04 + i * 0.012})`;
+            ctx.lineWidth = Math.max(1, size * (0.02 + i * 0.003));
+            ctx.beginPath();
+            ctx.arc(center, center, center * (0.28 + i * 0.09), 0, Math.PI * 2);
+            ctx.stroke();
+        }
+
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.18)';
+        for (let i = 0; i < 4; i++) {
+            const flareX = center + (Math.random() - 0.5) * center * 0.8;
+            const flareY = center + (Math.random() - 0.5) * center * 0.8;
+            const flareSize = size * (0.035 + Math.random() * 0.03);
+            ctx.beginPath();
+            ctx.arc(flareX, flareY, flareSize, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        return canvas;
+    }
+
+    generateWolfRayetTexture(radius = this.radius, mass = this.mass) {
+        const size = Math.ceil(radius * 4);
+        const canvas = document.createElement('canvas');
+        canvas.width = size;
+        canvas.height = size;
+        const ctx = canvas.getContext('2d');
+        const center = size / 2;
+        const { red, green, blue } = getStarColorChannels(mass);
+
+        const gradient = ctx.createRadialGradient(center, center, 0, center, center, center);
+        gradient.addColorStop(0, 'rgba(255, 255, 255, 1)');
+        gradient.addColorStop(0.18, `rgba(${red}, ${green}, ${blue}, 0.98)`);
+        gradient.addColorStop(0.48, `rgba(${Math.min(255, red + 15)}, ${Math.min(255, green + 10)}, 255, 0.86)`);
+        gradient.addColorStop(0.78, 'rgba(129, 140, 248, 0.52)');
+        gradient.addColorStop(1, 'rgba(67, 56, 202, 0.15)');
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, 0, size, size);
+
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
+        ctx.lineWidth = Math.max(1, size * 0.03);
+        for (let i = 0; i < 3; i++) {
+            const swirlRadius = center * (0.34 + i * 0.12);
+            ctx.beginPath();
+            ctx.arc(center, center, swirlRadius, Math.PI * (0.18 + i * 0.1), Math.PI * (1.22 + i * 0.12));
+            ctx.stroke();
+        }
+
+        return canvas;
+    }
+
+    generateWhiteDwarfTexture(radius = this.radius) {
+        const size = Math.ceil(radius * 4);
+        const canvas = document.createElement('canvas');
+        canvas.width = size;
+        canvas.height = size;
+        const ctx = canvas.getContext('2d');
+        const center = size / 2;
+
+        ctx.clearRect(0, 0, size, size);
+
+        const haloGradient = ctx.createRadialGradient(center, center, 0, center, center, center);
+        haloGradient.addColorStop(0, 'rgba(255, 255, 255, 0.95)');
+        haloGradient.addColorStop(0.18, 'rgba(219, 234, 254, 0.95)');
+        haloGradient.addColorStop(0.4, 'rgba(191, 219, 254, 0.55)');
+        haloGradient.addColorStop(1, 'rgba(147, 197, 253, 0)');
+        ctx.fillStyle = haloGradient;
+        ctx.fillRect(0, 0, size, size);
+
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.65)';
+        ctx.lineWidth = Math.max(1, size * 0.04);
         ctx.beginPath();
-        ctx.arc(center, center, center * 0.55, 0, Math.PI * 2);
+        ctx.arc(center, center, center * 0.28, 0, Math.PI * 2);
+        ctx.stroke();
+
+        ctx.strokeStyle = 'rgba(191, 219, 254, 0.45)';
+        ctx.lineWidth = Math.max(1, size * 0.025);
+        ctx.beginPath();
+        ctx.arc(center, center, center * 0.44, 0, Math.PI * 2);
+        ctx.stroke();
+
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.35)';
+        ctx.lineWidth = Math.max(1, size * 0.02);
+        ctx.beginPath();
+        ctx.moveTo(center - center * 0.78, center);
+        ctx.lineTo(center + center * 0.78, center);
+        ctx.moveTo(center, center - center * 0.78);
+        ctx.lineTo(center, center + center * 0.78);
+        ctx.moveTo(center - center * 0.58, center - center * 0.58);
+        ctx.lineTo(center + center * 0.58, center + center * 0.58);
+        ctx.moveTo(center + center * 0.58, center - center * 0.58);
+        ctx.lineTo(center - center * 0.58, center + center * 0.58);
         ctx.stroke();
 
         return canvas;
@@ -283,30 +399,42 @@ class BrowserBody extends Body {
         const centerX = size / 2;
         const centerY = size / 2;
 
-        ctx.fillStyle = '#001a33';
+        ctx.clearRect(0, 0, size, size);
+
+        const haloGradient = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, size * 0.5);
+        haloGradient.addColorStop(0, 'rgba(255, 255, 255, 0.95)');
+        haloGradient.addColorStop(0.12, 'rgba(216, 180, 255, 0.92)');
+        haloGradient.addColorStop(0.28, 'rgba(147, 197, 253, 0.7)');
+        haloGradient.addColorStop(0.55, 'rgba(168, 85, 247, 0.28)');
+        haloGradient.addColorStop(1, 'rgba(88, 28, 135, 0)');
+        ctx.fillStyle = haloGradient;
         ctx.fillRect(0, 0, size, size);
 
-        const coreGradient = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, size * 0.45);
-        coreGradient.addColorStop(0, '#ffffff');
-        coreGradient.addColorStop(0.15, '#ffeecc');
-        coreGradient.addColorStop(0.4, '#64d9ff');
-        coreGradient.addColorStop(1, '#003366');
-        ctx.fillStyle = coreGradient;
-        ctx.fillRect(0, 0, size, size);
+        ctx.save();
+        ctx.translate(centerX, centerY);
+        ctx.rotate(this.compactFieldTilt);
+        const jetGradient = ctx.createLinearGradient(0, -size * 0.8, 0, size * 0.8);
+        jetGradient.addColorStop(0, 'rgba(196, 181, 253, 0)');
+        jetGradient.addColorStop(0.18, 'rgba(196, 181, 253, 0.7)');
+        jetGradient.addColorStop(0.5, 'rgba(255, 255, 255, 0.15)');
+        jetGradient.addColorStop(0.82, 'rgba(196, 181, 253, 0.7)');
+        jetGradient.addColorStop(1, 'rgba(196, 181, 253, 0)');
+        ctx.strokeStyle = jetGradient;
+        ctx.lineWidth = Math.max(1, size * 0.06);
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(0, -size * 0.78);
+        ctx.lineTo(0, -size * 0.18);
+        ctx.moveTo(0, size * 0.18);
+        ctx.lineTo(0, size * 0.78);
+        ctx.stroke();
+        ctx.restore();
 
-        ctx.strokeStyle = 'rgba(100, 220, 255, 0.4)';
-        ctx.lineWidth = 1;
-        for (let i = 0; i < 8; i++) {
-            const angle = (i / 8) * Math.PI * 2;
-            const startX = centerX + Math.cos(angle) * (size * 0.25);
-            const startY = centerY + Math.sin(angle) * (size * 0.25);
-            const endX = centerX + Math.cos(angle) * (size * 0.45);
-            const endY = centerY + Math.sin(angle) * (size * 0.45);
-            ctx.beginPath();
-            ctx.moveTo(startX, startY);
-            ctx.lineTo(endX, endY);
-            ctx.stroke();
-        }
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.45)';
+        ctx.lineWidth = Math.max(1, size * 0.025);
+        ctx.beginPath();
+        ctx.arc(centerX, centerY, size * 0.16, 0, Math.PI * 2);
+        ctx.stroke();
 
         return canvas;
     }
@@ -434,7 +562,13 @@ class Simulator extends SimulationCore {
             return;
         }
 
-        this.spawnPlanet(worldX, worldY, this.getRandomMassForPreset(spawnType), spawnPreset.bodyState || null);
+        const mass = this.getRandomMassForPreset(spawnType);
+        if (spawnPreset.bodyState === 'star') {
+            this.spawnStellarBody(worldX, worldY, mass, true);
+            return;
+        }
+
+        this.spawnPlanet(worldX, worldY, mass, spawnPreset.bodyState || null);
     }
 
     setupInputControls() {
@@ -550,7 +684,10 @@ class Simulator extends SimulationCore {
         case 'gas-giant':
             return { red: 255, green: 190, blue: 120 };
         case 'star':
+        case 'wolf-rayet':
             return getStarColorChannels(body.mass);
+        case 'red-giant':
+            return { red: 255, green: 150, blue: 90 };
         case 'white-dwarf':
             return { red: 219, green: 234, blue: 254 };
         case 'neutron-star':
@@ -715,27 +852,50 @@ class Simulator extends SimulationCore {
                 }
 
                 this.ctx.restore();
-            } else if (body.bodyType === 'star') {
+            } else if (body.bodyType === 'star' || body.bodyType === 'red-giant' || body.bodyType === 'wolf-rayet') {
                 const {
                     red: starRed,
                     green: starGreen,
                     blue: starBlue,
                     massFraction,
                 } = getStarColorChannels(body.mass);
+                const isRedGiant = body.bodyType === 'red-giant';
+                const isWolfRayet = body.bodyType === 'wolf-rayet';
+                const stellarPulse = Math.sin(body.pulseTime * (isWolfRayet ? (4 + body.instabilityProgress * 10) : (isRedGiant ? 0.8 : 1.8))) * 0.5 + 0.5;
+                let glowBrightness = 0.2 + massFraction * 0.6;
+                let glowRadius = 1.8 + massFraction * 1.2;
+                let drawRadius = screenRadius;
 
-                // Glow brightness and size increase toward blue (higher mass)
-                const glowBrightness = 0.2 + massFraction * 0.6;
-                const glowRadius = 1.8 + massFraction * 1.2; // Glow expands from 1.8x to 3.0x
+                if (isRedGiant) {
+                    glowBrightness = 0.34 + stellarPulse * 0.12;
+                    glowRadius = 3.3 + stellarPulse * 0.45;
+                    drawRadius = screenRadius * (1.9 + stellarPulse * 0.14);
+                } else if (isWolfRayet) {
+                    glowBrightness = 0.45 + body.instabilityProgress * 0.4 + stellarPulse * 0.25;
+                    glowRadius = 2.3 + body.instabilityProgress * 0.9 + stellarPulse * 0.55;
+                    drawRadius = screenRadius * (1.01 + stellarPulse * 0.08 + body.instabilityProgress * 0.06);
+                }
 
                 // Draw outer glow with star color - steeper gradient
-                const glowGradient = this.ctx.createRadialGradient(screenX, screenY, screenRadius, screenX, screenY, screenRadius * glowRadius);
-                glowGradient.addColorStop(0, `rgba(${starRed}, ${starGreen}, ${starBlue}, ${glowBrightness})`);
-                glowGradient.addColorStop(0.5, `rgba(${starRed}, ${starGreen}, ${starBlue}, ${glowBrightness * 0.3})`);
+                const glowGradient = this.ctx.createRadialGradient(screenX, screenY, drawRadius, screenX, screenY, drawRadius * glowRadius);
+                const glowRed = isRedGiant ? 255 : starRed;
+                const glowGreen = isRedGiant ? 145 : starGreen;
+                const glowBlue = isRedGiant ? 90 : starBlue;
+                glowGradient.addColorStop(0, `rgba(${glowRed}, ${glowGreen}, ${glowBlue}, ${glowBrightness})`);
+                glowGradient.addColorStop(0.5, `rgba(${glowRed}, ${glowGreen}, ${glowBlue}, ${glowBrightness * 0.3})`);
                 glowGradient.addColorStop(1, `rgba(${starRed}, ${starGreen}, ${starBlue}, 0)`);
                 this.ctx.fillStyle = glowGradient;
                 this.ctx.beginPath();
-                this.ctx.arc(screenX, screenY, screenRadius * glowRadius, 0, Math.PI * 2);
+                this.ctx.arc(screenX, screenY, drawRadius * glowRadius, 0, Math.PI * 2);
                 this.ctx.fill();
+
+                if (isWolfRayet) {
+                    this.ctx.strokeStyle = `rgba(255, 255, 255, ${0.18 + body.instabilityProgress * 0.22})`;
+                    this.ctx.lineWidth = Math.max(1, drawRadius * (0.07 + body.instabilityProgress * 0.05));
+                    this.ctx.beginPath();
+                    this.ctx.arc(screenX, screenY, drawRadius * (1.12 + stellarPulse * 0.1), 0, Math.PI * 2);
+                    this.ctx.stroke();
+                }
 
                 // Draw the star itself
                 if (body.texture) {
@@ -743,37 +903,49 @@ class Simulator extends SimulationCore {
                     this.ctx.translate(screenX, screenY);
                     this.ctx.rotate(body.rotationAngle);
 
-                    // Clip to circle
-                    this.ctx.beginPath();
-                    this.ctx.arc(0, 0, screenRadius, 0, Math.PI * 2);
-                    this.ctx.clip();
+                    if (!isRedGiant) {
+                        // Clip to circle
+                        this.ctx.beginPath();
+                        this.ctx.arc(0, 0, drawRadius, 0, Math.PI * 2);
+                        this.ctx.clip();
+                    }
 
-                    this.ctx.drawImage(body.texture, -screenRadius, -screenRadius, screenRadius * 2, screenRadius * 2);
+                    this.ctx.drawImage(body.texture, -drawRadius, -drawRadius, drawRadius * 2, drawRadius * 2);
                     this.ctx.restore();
                 } else {
-                    this.ctx.fillStyle = `rgb(${starRed}, ${starGreen}, ${starBlue})`;
+                    if (isRedGiant) {
+                        this.ctx.fillStyle = 'rgb(255, 140, 90)';
+                    } else {
+                        this.ctx.fillStyle = `rgb(${starRed}, ${starGreen}, ${starBlue})`;
+                    }
                     this.ctx.beginPath();
-                    this.ctx.arc(screenX, screenY, screenRadius, 0, Math.PI * 2);
+                    this.ctx.arc(screenX, screenY, drawRadius, 0, Math.PI * 2);
                     this.ctx.fill();
                 }
 
                 // Draw highlight shine with increasing brightness
-                const shineBrightness = 0.2 + massFraction * 0.3;
-                const shineGradient = this.ctx.createRadialGradient(screenX - screenRadius * 0.3, screenY - screenRadius * 0.3, 0, screenX, screenY, screenRadius);
+                const shineBrightness = isRedGiant ?
+                    (0.12 + stellarPulse * 0.12) :
+                    (0.2 + massFraction * 0.3 + (isWolfRayet ? body.instabilityProgress * 0.18 : 0));
+                const shineGradient = this.ctx.createRadialGradient(screenX - drawRadius * 0.3, screenY - drawRadius * 0.3, 0, screenX, screenY, drawRadius);
                 shineGradient.addColorStop(0, `rgba(255, 255, 255, ${shineBrightness})`);
                 shineGradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
                 this.ctx.fillStyle = shineGradient;
                 this.ctx.beginPath();
-                this.ctx.arc(screenX, screenY, screenRadius, 0, Math.PI * 2);
+                this.ctx.arc(screenX, screenY, drawRadius, 0, Math.PI * 2);
                 this.ctx.fill();
             } else if (body.bodyType === 'white-dwarf') {
-                const wdGlowGradient = this.ctx.createRadialGradient(screenX, screenY, screenRadius, screenX, screenY, screenRadius * 2.4);
-                wdGlowGradient.addColorStop(0, 'rgba(219, 234, 254, 0.9)');
-                wdGlowGradient.addColorStop(0.45, 'rgba(147, 197, 253, 0.35)');
-                wdGlowGradient.addColorStop(1, 'rgba(59, 130, 246, 0)');
+                const twinklePhase = Math.sin(body.pulseTime * 2.2 + body.compactGlowPhase) * 0.5 + 0.5;
+                const glowScale = 2.1 + twinklePhase * 0.7 * body.compactHaloScale;
+                const spikeScale = 1.35 + twinklePhase * 0.85;
+                const wdGlowGradient = this.ctx.createRadialGradient(screenX, screenY, screenRadius * 0.15, screenX, screenY, screenRadius * glowScale);
+                wdGlowGradient.addColorStop(0, `rgba(255, 255, 255, ${0.95 - twinklePhase * 0.1})`);
+                wdGlowGradient.addColorStop(0.2, `rgba(219, 234, 254, ${0.7 + twinklePhase * 0.15})`);
+                wdGlowGradient.addColorStop(0.5, `rgba(191, 219, 254, ${0.28 + twinklePhase * 0.08})`);
+                wdGlowGradient.addColorStop(1, 'rgba(96, 165, 250, 0)');
                 this.ctx.fillStyle = wdGlowGradient;
                 this.ctx.beginPath();
-                this.ctx.arc(screenX, screenY, screenRadius * 2.4, 0, Math.PI * 2);
+                this.ctx.arc(screenX, screenY, screenRadius * glowScale, 0, Math.PI * 2);
                 this.ctx.fill();
 
                 if (body.texture) {
@@ -789,6 +961,26 @@ class Simulator extends SimulationCore {
                     this.ctx.beginPath();
                     this.ctx.arc(screenX, screenY, screenRadius, 0, Math.PI * 2);
                     this.ctx.fill();
+                }
+
+                const sparkleOffsets = body.compactSparkleOffsets || [0, Math.PI / 2, Math.PI, (Math.PI * 3) / 2];
+                const spikeAngles = [0, Math.PI / 4, Math.PI / 2, Math.PI * 0.75];
+                const baseSpikeLengths = [1.9, 1.45, 1.75, 1.3];
+
+                for (let i = 0; i < spikeAngles.length; i++) {
+                    const localPhase = Math.sin(body.pulseTime * 3.2 + sparkleOffsets[i]) * 0.5 + 0.5;
+                    const localScale = (0.9 + localPhase * 0.95) * (0.85 + twinklePhase * 0.35);
+                    const angle = spikeAngles[i];
+                    const spikeLength = screenRadius * baseSpikeLengths[i] * localScale;
+                    const dx = Math.cos(angle) * spikeLength;
+                    const dy = Math.sin(angle) * spikeLength;
+
+                    this.ctx.strokeStyle = `rgba(255, 255, 255, ${0.18 + localPhase * 0.42})`;
+                    this.ctx.lineWidth = Math.max(1, screenRadius * (0.08 + localPhase * 0.08));
+                    this.ctx.beginPath();
+                    this.ctx.moveTo(screenX - dx, screenY - dy);
+                    this.ctx.lineTo(screenX + dx, screenY + dy);
+                    this.ctx.stroke();
                 }
             } else if (body.bodyType === 'gas-giant') {
                 // Gas giants with glow effect
@@ -877,16 +1069,59 @@ class Simulator extends SimulationCore {
                 const glowBrightness = body.pulseBrightnessMin + pulsePhase * brightnessDelta;
                 const radiusDelta = body.pulseRadiusMax - body.pulseRadiusMin;
                 const glowRadius = body.pulseRadiusMin + pulsePhase * radiusDelta;
+                const jetLength = screenRadius * (2.8 + pulsePhase * 2.2);
+                const jetWidth = Math.max(1.5, screenRadius * (0.16 + pulsePhase * 0.05));
 
-                // Draw outer glow (very bright and blue) - violently pulsating
-                const nsGlowGradient = this.ctx.createRadialGradient(screenX, screenY, screenRadius, screenX, screenY, screenRadius * glowRadius);
-                nsGlowGradient.addColorStop(0, `rgba(100, 220, 255, ${glowBrightness})`);
-                nsGlowGradient.addColorStop(0.4, `rgba(100, 200, 255, ${glowBrightness * 0.5})`);
-                nsGlowGradient.addColorStop(1, 'rgba(100, 180, 255, 0)');
+                // Draw outer glow (bright blue-violet radiation halo)
+                const nsGlowGradient = this.ctx.createRadialGradient(screenX, screenY, screenRadius * 0.2, screenX, screenY, screenRadius * glowRadius * (1.1 + body.compactHaloScale * 0.15));
+                nsGlowGradient.addColorStop(0, `rgba(255, 255, 255, ${0.45 + glowBrightness * 0.35})`);
+                nsGlowGradient.addColorStop(0.18, `rgba(216, 180, 255, ${glowBrightness * 0.92})`);
+                nsGlowGradient.addColorStop(0.4, `rgba(147, 197, 253, ${glowBrightness * 0.58})`);
+                nsGlowGradient.addColorStop(0.72, `rgba(168, 85, 247, ${glowBrightness * 0.22})`);
+                nsGlowGradient.addColorStop(1, 'rgba(88, 28, 135, 0)');
                 this.ctx.fillStyle = nsGlowGradient;
                 this.ctx.beginPath();
-                this.ctx.arc(screenX, screenY, screenRadius * glowRadius, 0, Math.PI * 2);
+                this.ctx.arc(screenX, screenY, screenRadius * glowRadius * (1.1 + body.compactHaloScale * 0.15), 0, Math.PI * 2);
                 this.ctx.fill();
+
+                this.ctx.save();
+                this.ctx.translate(screenX, screenY);
+                this.ctx.rotate(body.compactFieldTilt + body.pulseTime * 0.6);
+                const jetGradient = this.ctx.createLinearGradient(0, -jetLength, 0, jetLength);
+                jetGradient.addColorStop(0, 'rgba(216, 180, 255, 0)');
+                jetGradient.addColorStop(0.18, `rgba(216, 180, 255, ${0.42 + pulsePhase * 0.2})`);
+                jetGradient.addColorStop(0.5, `rgba(255, 255, 255, ${0.12 + pulsePhase * 0.08})`);
+                jetGradient.addColorStop(0.82, `rgba(216, 180, 255, ${0.42 + pulsePhase * 0.2})`);
+                jetGradient.addColorStop(1, 'rgba(216, 180, 255, 0)');
+                this.ctx.strokeStyle = jetGradient;
+                this.ctx.lineWidth = jetWidth;
+                this.ctx.lineCap = 'round';
+                this.ctx.beginPath();
+                this.ctx.moveTo(0, -jetLength);
+                this.ctx.lineTo(0, -screenRadius * 0.65);
+                this.ctx.moveTo(0, screenRadius * 0.65);
+                this.ctx.lineTo(0, jetLength);
+                this.ctx.stroke();
+
+                for (let jetSide = -1; jetSide <= 1; jetSide += 2) {
+                    for (let i = 0; i < 4; i++) {
+                        const travel = ((body.pulseTime * 1.6) + (i * 0.21)) % 1;
+                        const distance = screenRadius * 0.85 + (jetLength - screenRadius * 0.85) * travel;
+                        const swirlOffset = Math.sin((body.pulseTime * 5) + (i * 1.1)) * screenRadius * (0.16 + travel * 0.12);
+                        const knotX = swirlOffset;
+                        const knotY = distance * jetSide;
+                        const knotRadius = Math.max(1.5, screenRadius * (0.12 + (1 - travel) * 0.08));
+                        const knotGradient = this.ctx.createRadialGradient(knotX, knotY, 0, knotX, knotY, knotRadius * 2.6);
+                        knotGradient.addColorStop(0, `rgba(255, 255, 255, ${0.45 + (1 - travel) * 0.2})`);
+                        knotGradient.addColorStop(0.4, `rgba(216, 180, 255, ${0.28 + (1 - travel) * 0.15})`);
+                        knotGradient.addColorStop(1, 'rgba(168, 85, 247, 0)');
+                        this.ctx.fillStyle = knotGradient;
+                        this.ctx.beginPath();
+                        this.ctx.arc(knotX, knotY, knotRadius * 2.6, 0, Math.PI * 2);
+                        this.ctx.fill();
+                    }
+                }
+                this.ctx.restore();
 
                 // Draw the neutron star itself
                 if (body.texture) {
@@ -910,7 +1145,7 @@ class Simulator extends SimulationCore {
                 // Draw bright inner shine (pulsates with same randomization)
                 const shineDelta = 1.0 - body.pulseBrightnessMin;
                 const nsShineGradient = this.ctx.createRadialGradient(screenX - screenRadius * 0.2, screenY - screenRadius * 0.2, 0, screenX, screenY, screenRadius);
-                nsShineGradient.addColorStop(0, `rgba(255, 255, 255, ${body.pulseBrightnessMin + pulsePhase * shineDelta})`);
+                nsShineGradient.addColorStop(0, `rgba(255, 255, 255, ${Math.min(1, body.pulseBrightnessMin + pulsePhase * shineDelta + 0.15)})`);
                 nsShineGradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
                 this.ctx.fillStyle = nsShineGradient;
                 this.ctx.beginPath();
@@ -1230,7 +1465,7 @@ class Simulator extends SimulationCore {
                 const starScreenX = (effect.body.x - this.cameraX) * this.zoom;
                 const starScreenY = (effect.body.y - this.cameraY) * this.zoom;
                 const whiteSphereBrightness = Math.min(1.0, props.brightness * 1.2);
-                const whiteRadius = Math.max(effect.body.radius * this.zoom, 3); // Scale with actual body radius
+                const whiteRadius = Math.max((effect.displayRadius ?? effect.body.radius) * this.zoom, 3);
                 this.ctx.fillStyle = `rgba(255, 255, 255, ${whiteSphereBrightness})`;
                 this.ctx.beginPath();
                 this.ctx.arc(starScreenX, starScreenY, whiteRadius, 0, Math.PI * 2);
@@ -1358,6 +1593,41 @@ class Simulator extends SimulationCore {
             this.ctx.beginPath();
             this.ctx.arc(screenX, screenY, innerShellRadius, 0, Math.PI * 2);
             this.ctx.stroke();
+
+            const plumePhase = Math.max(0, 1 - (props.phase / 0.33));
+            if (plumePhase > 0) {
+                this.ctx.save();
+                this.ctx.translate(screenX, screenY);
+                const spiralTime = Date.now() * 0.000075;
+                const spiralArms = 3;
+                const spiralTurns = 2.8 + props.shimmer * 0.8;
+                const spiralStart = innerShellRadius * 0.55;
+                const spiralEnd = shellRadius * (1.55 + props.shimmer * 0.35);
+
+                this.ctx.rotate(spiralTime * 0.35 + props.shimmer * 0.25);
+
+                for (let arm = 0; arm < spiralArms; arm++) {
+                    const armOffset = (arm / spiralArms) * Math.PI * 2;
+
+                    for (let i = 0; i < 6; i++) {
+                        const travel = ((spiralTime * (0.028 + props.shimmer * 0.01)) + (i * 0.17) + (arm * 0.09)) % 1;
+                        const radius = spiralStart + (spiralEnd - spiralStart) * travel;
+                        const angle = armOffset + (travel * Math.PI * 2 * spiralTurns);
+                        const knotX = Math.cos(angle) * radius;
+                        const knotY = Math.sin(angle) * radius;
+                        const knotRadius = Math.max(1.6, shellRadius * (0.045 + (1 - travel) * 0.035));
+                        const knotGradient = this.ctx.createRadialGradient(knotX, knotY, 0, knotX, knotY, knotRadius * 3.4);
+                        knotGradient.addColorStop(0, `rgba(255, 245, 220, ${props.brightness * plumePhase * (0.34 + (1 - travel) * 0.16)})`);
+                        knotGradient.addColorStop(0.4, `rgba(255, 170, 220, ${props.brightness * plumePhase * (0.2 + (1 - travel) * 0.12)})`);
+                        knotGradient.addColorStop(1, 'rgba(168, 85, 247, 0)');
+                        this.ctx.fillStyle = knotGradient;
+                        this.ctx.beginPath();
+                        this.ctx.arc(knotX, knotY, knotRadius * 3.4, 0, Math.PI * 2);
+                        this.ctx.fill();
+                    }
+                }
+                this.ctx.restore();
+            }
         }
     }
 
@@ -1475,16 +1745,16 @@ class Simulator extends SimulationCore {
         return super.createExplosion(x, y, mass, intensity);
     }
 
-    createSupernovaWithBody(x, y, radius, body) {
-        return super.createSupernovaWithBody(x, y, radius, body);
+    createSupernovaWithBody(x, y, radius, body, displayRadius = null) {
+        return super.createSupernovaWithBody(x, y, radius, body, displayRadius);
     }
 
     createSupernova(x, y, radius) {
         return super.createSupernova(x, y, radius);
     }
 
-    createAccretionBurst(x, y, body) {
-        return super.createAccretionBurst(x, y, body);
+    createAccretionBurst(x, y, body, consumedMass) {
+        return super.createAccretionBurst(x, y, body, consumedMass);
     }
 
     clearAll() {
@@ -1744,6 +2014,137 @@ function getGlobularClusterPositions(clusterRadius, blueprints) {
     return positions;
 }
 
+function getGalaxyCoreOrbiterBlueprints(sim, orbiterCount) {
+    const baseCount = Math.floor(orbiterCount / 3);
+    const remainder = orbiterCount - baseCount * 3;
+    const starCount = baseCount + (remainder > 0 ? 1 : 0);
+    const compactObjectCount = baseCount + (remainder > 1 ? 1 : 0);
+    const smallBlackHoleCount = baseCount;
+    const blueprints = [];
+
+    for (let i = 0; i < starCount; i++) {
+        const mass = sim.getRandomMassForPreset('star');
+        blueprints.push({
+            bodyType: 'star',
+            mass,
+            radius: sim.getRadiusFromMass(mass, 'star'),
+        });
+    }
+
+    for (let i = 0; i < compactObjectCount; i++) {
+        const bodyType = Math.random() < 0.65 ? 'white-dwarf' : 'neutron-star';
+        const mass = sim.getRandomMassForPreset(bodyType);
+        blueprints.push({
+            bodyType,
+            mass,
+            radius: sim.getRadiusFromMass(mass, bodyType),
+        });
+    }
+
+    for (let i = 0; i < smallBlackHoleCount; i++) {
+        const mass = sim.getRandomMassForPreset('black-hole');
+        blueprints.push({
+            bodyType: 'black-hole',
+            mass,
+            radius: sim.getRadiusFromMass(mass, 'black-hole'),
+        });
+    }
+
+    for (let i = blueprints.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [blueprints[i], blueprints[j]] = [blueprints[j], blueprints[i]];
+    }
+
+    return blueprints;
+}
+
+function getGalaxyCoreOrbiterCount(innerOrbit, outerOrbit) {
+    const requestedOrbiterCount = Math.floor(Math.random() * 26) + 15;
+    const orbitalSpan = Math.max(0, outerOrbit - innerOrbit);
+    const spanLimitedMax = Math.max(15, Math.min(32, Math.floor(orbitalSpan / 18)));
+    return Math.min(requestedOrbiterCount, spanLimitedMax);
+}
+
+function getGalaxyCoreOrbitalVelocity(circularSpeed, preferCircular = false) {
+    const eccentricity = preferCircular
+        ? Math.random() * 0.12
+        : 0.12 + Math.pow(Math.random(), 0.7) * 0.76;
+
+    if (eccentricity < 0.12) {
+        return {
+            tangentialSpeed: circularSpeed * (0.96 + Math.random() * 0.08),
+            radialSpeed: circularSpeed * ((Math.random() - 0.5) * 0.04),
+            eccentricity,
+        };
+    }
+
+    const isNearPeriapsis = Math.random() < 0.4;
+    const tangentialFactor = isNearPeriapsis ? Math.sqrt(1 + eccentricity) : Math.sqrt(Math.max(0.12, 1 - eccentricity));
+    const radialDirection = Math.random() < 0.5 ? -1 : 1;
+    const radialFactor = eccentricity * (0.08 + Math.random() * 0.28) * radialDirection;
+
+    return {
+        tangentialSpeed: circularSpeed * tangentialFactor,
+        radialSpeed: circularSpeed * radialFactor,
+        eccentricity,
+    };
+}
+
+function getGalaxyCorePositions(innerOrbit, outerOrbit, blueprints) {
+    const positions = [];
+
+    for (let i = 0; i < blueprints.length; i++) {
+        const inwardBias = Math.pow(Math.random(), 1.4);
+        const distance = innerOrbit + (outerOrbit - innerOrbit) * inwardBias;
+        const angle = Math.random() * Math.PI * 2;
+        positions.push({
+            x: Math.cos(angle) * distance,
+            y: Math.sin(angle) * distance,
+            distance,
+            angle,
+        });
+    }
+
+    positions.sort((a, b) => a.distance - b.distance);
+
+    for (let i = 1; i < positions.length; i++) {
+        const previousPosition = positions[i - 1];
+        const previousRadius = blueprints[i - 1].radius;
+        const currentRadius = blueprints[i].radius;
+        const zoneProgress = i / (positions.length - 1);
+        const minimumGap = Math.max(14, previousRadius + currentRadius + 10 + ((1 - zoneProgress) * 8));
+        positions[i].distance = Math.max(positions[i].distance, previousPosition.distance + minimumGap);
+    }
+
+    const overflow = positions[positions.length - 1].distance - outerOrbit;
+    if (overflow > 0) {
+        for (let i = 1; i < positions.length; i++) {
+            const reductionShare = i / (positions.length - 1);
+            const reducedDistance = positions[i].distance - (overflow * reductionShare);
+            const previousPosition = positions[i - 1];
+            const previousRadius = blueprints[i - 1].radius;
+            const currentRadius = blueprints[i].radius;
+            const minimumGap = Math.max(10, previousRadius + currentRadius + 8);
+            positions[i].distance = Math.max(reducedDistance, previousPosition.distance + minimumGap);
+        }
+    }
+
+    const finalOverflow = positions[positions.length - 1].distance - outerOrbit;
+    if (finalOverflow > 0 && outerOrbit > innerOrbit) {
+        const scale = (outerOrbit - innerOrbit) / (positions[positions.length - 1].distance - innerOrbit);
+        for (const position of positions) {
+            position.distance = innerOrbit + (position.distance - innerOrbit) * scale;
+        }
+    }
+
+    for (const position of positions) {
+        position.x = Math.cos(position.angle) * position.distance;
+        position.y = Math.sin(position.angle) * position.distance;
+    }
+
+    return positions;
+}
+
 function balanceSystemMomentum(bodies) {
     let totalMass = 0;
     let totalMomentumX = 0;
@@ -1772,7 +2173,7 @@ function seedSolarSystemScenario(sim) {
     sim.darkMatterStrength = 0;
 
     const starMass = sim.getRandomMassForPreset('star');
-    const star = sim.spawnPlanet(0, 0, starMass);
+    const star = sim.spawnPlanet(0, 0, starMass, 'star');
     star.vx = 0;
     star.vy = 0;
 
@@ -1847,6 +2248,49 @@ function seedGlobularClusterScenario(sim) {
     balanceSystemMomentum(systemBodies);
 }
 
+function seedGalaxyCoreScenario(sim) {
+    sim.darkMatterStrength = 0;
+
+    const coreMass = sim.getRandomMassForPreset('supermassive-black-hole');
+    const core = sim.spawnPlanet(0, 0, coreMass, 'black-hole');
+    core.vx = 0;
+    core.vy = 0;
+
+    const maxOrbitRadius = getMaxZoomOutClusterRadius(sim) * 0.7;
+    const innerOrbit = core.radius + 40;
+    const outerOrbit = Math.max(innerOrbit + 60, maxOrbitRadius);
+    const orbiterCount = getGalaxyCoreOrbiterCount(innerOrbit, outerOrbit);
+    const orbitalDirection = Math.random() < 0.5 ? 1 : -1;
+    const blueprints = getGalaxyCoreOrbiterBlueprints(sim, orbiterCount);
+    const positions = getGalaxyCorePositions(innerOrbit, outerOrbit, blueprints);
+    const systemBodies = [core];
+    const nearCircularCount = Math.max(1, Math.floor(blueprints.length * 0.2));
+
+    for (let i = 0; i < blueprints.length; i++) {
+        const blueprint = blueprints[i];
+        const position = positions[i];
+        const body = sim.spawnPlanet(position.x, position.y, blueprint.mass, blueprint.bodyType);
+        const orbitalDistance = Math.max(position.distance, Math.max(blueprint.radius * 2, innerOrbit));
+        const orbitalSpeed = getCircularOrbitSpeed(
+            core.mass,
+            orbitalDistance,
+            sim.gravityConstant,
+            sim.massRealizationScale
+        );
+        const orbitalVelocity = getGalaxyCoreOrbitalVelocity(orbitalSpeed, i < nearCircularCount);
+        const tangentX = -Math.sin(position.angle) * orbitalDirection;
+        const tangentY = Math.cos(position.angle) * orbitalDirection;
+        const radialX = Math.cos(position.angle);
+        const radialY = Math.sin(position.angle);
+
+        body.vx = tangentX * orbitalVelocity.tangentialSpeed + radialX * orbitalVelocity.radialSpeed;
+        body.vy = tangentY * orbitalVelocity.tangentialSpeed + radialY * orbitalVelocity.radialSpeed;
+        systemBodies.push(body);
+    }
+
+    balanceSystemMomentum(systemBodies);
+}
+
 function seedScenario(sim, scenarioName = 'sandbox') {
     if (scenarioName === 'sandbox') {
         seedSandboxScenario(sim);
@@ -1860,6 +2304,11 @@ function seedScenario(sim, scenarioName = 'sandbox') {
 
     if (scenarioName === 'globular-cluster') {
         seedGlobularClusterScenario(sim);
+        return;
+    }
+
+    if (scenarioName === 'galaxy-core') {
+        seedGalaxyCoreScenario(sim);
         return;
     }
 
