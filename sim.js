@@ -739,31 +739,6 @@ class Simulator {
     }
 
     setupInputControls() {
-        let isPanning = false;
-        let panStartX = 0;
-        let panStartY = 0;
-
-        this.canvas.addEventListener('mousedown', (e) => {
-            isPanning = true;
-            panStartX = e.clientX;
-            panStartY = e.clientY;
-        });
-
-        this.canvas.addEventListener('mousemove', (e) => {
-            if (isPanning) {
-                const deltaX = e.clientX - panStartX;
-                const deltaY = e.clientY - panStartY;
-                this.cameraX -= deltaX / this.zoom;
-                this.cameraY -= deltaY / this.zoom;
-                panStartX = e.clientX;
-                panStartY = e.clientY;
-            }
-        });
-
-        this.canvas.addEventListener('mouseup', () => {
-            isPanning = false;
-        });
-
         // Scroll wheel zoom
         this.canvas.addEventListener('wheel', (e) => {
             e.preventDefault();
